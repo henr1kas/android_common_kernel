@@ -33,6 +33,7 @@
 #include <linux/rseq.h>
 #include <linux/android_kabi.h>
 #include <linux/android_vendor.h>
+#include <linux/kflat_core.h>
 
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
@@ -1241,6 +1242,12 @@ struct task_struct {
 	/* KCOV sequence number: */
 	int				kcov_sequence;
 #endif
+
+	/* KFLAT */
+	enum kflat_mode			kflat_mode;
+	unsigned int			kflat_size;
+	void				*kflat_area;
+	struct kflat			*kflat;
 
 #ifdef CONFIG_MEMCG
 	struct mem_cgroup		*memcg_in_oom;
