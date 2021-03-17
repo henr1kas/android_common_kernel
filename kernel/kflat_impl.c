@@ -381,6 +381,73 @@ struct fixup_set_node *fixup_set_search(struct kflat* kflat, uintptr_t v) {
 	return 0;
 }
 
+int fixup_set_reserve(struct kflat* kflat, struct flat_node* node, size_t offset) {
+
+	struct fixup_set_node* inode;
+	struct fixup_set_node *data;
+	struct rb_node **new, *parent;
+
+	DBGS("fixup_set_reserve(%lx,%zu)\n",(uintptr_t)node,offset);
+
+	if (node==0) {
+		return ENOKEY;
+	}
+
+	inode = fixup_set_search(kflat,node->start+offset);
+
+	if (inode) {
+		return EEXIST;
+	}
+
+	data = create_fixup_set_node_element(node,offset,0);
+	if (!data) {
+		return ENOMEM;
+	}
+
+	new = &(kflat->FLCTRL.fixup_set_root.rb_root.rb_node);
+	parent = 0;
+
+	/* Figure out where to put new node */
+	while (*new) {
+		struct fixup_set_node *this = container_of(*new, struct fixup_set_node, node);
+
+		parent = *new;
+		if (ADDR_KEY(data) < ADDR_KEY(this))
+			new = &((*new)->rb_left);
+		else if (ADDR_KEY(data) > ADDR_KEY(this))
+			new = &((*new)->rb_right);
+		else
+			return EEXIST;
+	}
+
+	/* Add new node and rebalance tree. */
+	rb_link_node(&data->node, parent, new);
+	rb_insert_color(&data->node, &kflat->FLCTRL.fixup_set_root.rb_root);
+
+	return 0;
+}
+
+int fixup_set_update(struct kflat* kflat, struct flat_node* node, size_t offset, struct flatten_pointer* ptr) {
+
+	struct fixup_set_node* inode;
+
+	DBGS("fixup_set_update(%lx,%zu,%lx)\n",(uintptr_t)node,offset,(uintptr_t)ptr);
+
+	if (node==0) {
+		libflat_free(ptr);
+		return ENOKEY;
+	}
+
+	inode = fixup_set_search(kflat,node->start+offset);
+
+	if (!inode) {
+		return ENOKEY;
+	}
+
+	inode->ptr = ptr;
+	return 0;
+}
+
 int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset, struct flatten_pointer* ptr) {
 
 	struct fixup_set_node* inode;

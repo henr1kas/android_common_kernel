@@ -20,6 +20,13 @@
 #include <linux/random.h>
 #include <linux/kflat.h>
 
+#define START(node) ((node)->start)
+#define LAST(node)  ((node)->last)
+
+INTERVAL_TREE_DEFINE(struct flat_node, rb,
+		     uintptr_t, __subtree_last,
+		     START, LAST,static,interval_tree)
+
 struct string_node {
 	struct rb_node node;
 	char* s;
@@ -28,6 +35,8 @@ struct string_node {
 void flatten_set_debug_flag(struct kflat* kflat, int flag);
 
 static struct rb_root stringset_root = RB_ROOT;
+
+static struct string_node* stringset_search(const char* s) __attribute__ ((unused));
 
 static struct string_node* stringset_search(const char* s) {
 
@@ -80,6 +89,8 @@ static int stringset_insert(const char* s) {
 	return 1;
 }
 
+static void stringset_destroy(struct rb_root* root) __attribute__ ((unused));
+
 static void stringset_destroy(struct rb_root* root) {
 
     struct rb_node * p = rb_first(root);
@@ -131,6 +142,221 @@ static int kflat_simple_test(struct kflat *kflat, int debug_flag) {
 
 	FOR_ROOT_POINTER(pA,
 		FLATTEN_STRUCT(A, pA);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
+struct my_list_head;
+struct intermediate;
+struct my_task_struct;
+
+FUNCTION_DECLARE_FLATTEN_STRUCT_ITER(my_list_head);
+FUNCTION_DECLARE_FLATTEN_STRUCT_ITER(intermediate);
+FUNCTION_DECLARE_FLATTEN_STRUCT_ITER(my_task_struct);
+
+struct my_list_head {
+	struct my_list_head* prev;
+	struct my_list_head* next;
+};
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(my_list_head,
+	AGGREGATE_FLATTEN_STRUCT(my_list_head,prev);
+	AGGREGATE_FLATTEN_STRUCT(my_list_head,next);
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(my_list_head,
+	AGGREGATE_FLATTEN_STRUCT_ITER(my_list_head,prev);
+	AGGREGATE_FLATTEN_STRUCT_ITER(my_list_head,next);
+);
+
+struct intermediate {
+	struct my_list_head* plh;
+};
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(intermediate,
+	AGGREGATE_FLATTEN_STRUCT(my_list_head,plh);
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(intermediate,
+	AGGREGATE_FLATTEN_STRUCT_ITER(my_list_head,plh);
+);
+
+struct my_task_struct {
+	int pid;
+	struct intermediate* im;
+	struct my_list_head u;
+	float w;
+};
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(my_task_struct,
+	AGGREGATE_FLATTEN_STRUCT(intermediate,im);
+	AGGREGATE_FLATTEN_STRUCT(my_list_head,u.prev);
+	AGGREGATE_FLATTEN_STRUCT(my_list_head,u.next);
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(my_task_struct,
+	AGGREGATE_FLATTEN_STRUCT_ITER(intermediate,im);
+	AGGREGATE_FLATTEN_STRUCT_ITER(my_list_head,u.prev);
+	AGGREGATE_FLATTEN_STRUCT_ITER(my_list_head,u.next);
+);
+
+static int kflat_overlaplist_test(struct kflat *kflat, int debug_flag) {
+
+	struct my_task_struct T;
+	struct intermediate IM = {&T.u};
+	int err = 0;
+
+	T.pid = 123;
+	T.im = &IM;
+	T.u.prev = T.u.next = &T.u;
+	T.w = 1.0;
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	FOR_ROOT_POINTER(&T,
+		FLATTEN_STRUCT(my_task_struct,&T);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
+static int kflat_overlaplist_test_iter(struct kflat *kflat, int debug_flag) {
+
+	struct my_task_struct T;
+	struct intermediate IM = {&T.u};
+	int err = 0;
+
+	T.pid = 123;
+	T.im = &IM;
+	T.u.prev = T.u.next = &T.u;
+	T.w = 1.0;
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	FOR_ROOT_POINTER(&T,
+		UNDER_ITER_HARNESS(
+			FLATTEN_STRUCT_ITER(my_task_struct,&T);
+		);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
+typedef struct struct_B {
+	int i;
+} my_B;
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE(my_B,
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ITER(my_B,
+);
+
+typedef struct struct_A {
+	unsigned long ul;
+	my_B* pB0;
+	my_B* pB1;
+	my_B* pB2;
+	my_B* pB3;
+	char* p;
+} /*__attribute__((aligned(64)))*/ my_A;
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE(my_A,
+	STRUCT_ALIGN(64);
+	AGGREGATE_FLATTEN_STRUCT_TYPE(my_B,pB0);
+	AGGREGATE_FLATTEN_STRUCT_TYPE(my_B,pB1);
+	AGGREGATE_FLATTEN_STRUCT_TYPE(my_B,pB2);
+	AGGREGATE_FLATTEN_STRUCT_TYPE(my_B,pB3);
+	AGGREGATE_FLATTEN_STRING(p);
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ITER(my_A,
+	STRUCT_ALIGN(120);
+	AGGREGATE_FLATTEN_STRUCT_TYPE_ITER(my_B,pB0);
+	AGGREGATE_FLATTEN_STRUCT_TYPE_ITER(my_B,pB1);
+	AGGREGATE_FLATTEN_STRUCT_TYPE_ITER(my_B,pB2);
+	AGGREGATE_FLATTEN_STRUCT_TYPE_ITER(my_B,pB3);
+	AGGREGATE_FLATTEN_STRING(p);
+);
+
+static int kflat_overlapptr_test(struct kflat *kflat, int debug_flag) {
+
+	my_B arrB[4] = {{1},{2},{3},{4}};
+	my_A T[3] = {{},{0,&arrB[0],&arrB[1],&arrB[2],&arrB[3],"p in struct A"},{}};
+	int err = 0;
+	unsigned char* p;
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	flat_infos("sizeof(struct A): %zu\n",sizeof(my_A));
+	flat_infos("sizeof(struct B): %zu\n",sizeof(my_B));
+
+	p = (unsigned char*)&T[1]-8;
+	FOR_ROOT_POINTER(p,
+		FLATTEN_TYPE_ARRAY(unsigned char,p,sizeof(struct A)+16);
+	);
+
+	FOR_ROOT_POINTER(&T[1],
+		FLATTEN_STRUCT_TYPE(my_A,&T[1]);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
+static int kflat_overlapptr_test_iter(struct kflat *kflat, int debug_flag) {
+
+	my_B arrB[4] = {{1},{2},{3},{4}};
+	my_A T[3] = {{},{0,&arrB[0],&arrB[1],&arrB[2],&arrB[3],"p in struct A"},{}};
+	int err = 0;
+	unsigned char* p;
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	flat_infos("sizeof(struct A): %zu\n",sizeof(my_A));
+	flat_infos("sizeof(struct B): %zu\n",sizeof(my_B));
+
+	p = (unsigned char*)&T[1]-8;
+	FOR_ROOT_POINTER(p,
+		FLATTEN_TYPE_ARRAY(unsigned char,p,sizeof(struct A)+16);
+	);
+
+	FOR_ROOT_POINTER(&T[1],
+		UNDER_ITER_HARNESS(
+			FLATTEN_STRUCT_TYPE_ITER(my_A,&T[1]);
+		);
 	);
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
@@ -308,22 +534,50 @@ static int kflat_pointer_test(struct kflat *kflat, int debug_flag) {
 
 }
 
+#if 0
+FUNCTION_DECLARE_FLATTEN_STRUCT_ITER(task_struct);
+
 FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(task_struct,
+		AGGREGATE_FLATTEN_STRUCT_ITER(task_struct,last_wakee);
+		AGGREGATE_FLATTEN_STRUCT_ITER(task_struct,real_parent);
+		AGGREGATE_FLATTEN_STRUCT_ITER(task_struct,parent);
+		AGGREGATE_FLATTEN_STRUCT_ITER(task_struct,group_leader);
+		AGGREGATE_FLATTEN_STRUCT_ITER(task_struct,pi_top_task);
+		AGGREGATE_FLATTEN_STRUCT_ITER(task_struct,oom_reaper_list);
+);
+#endif
+
+FUNCTION_DECLARE_FLATTEN_STRUCT(task_struct);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(task_struct,
+		AGGREGATE_FLATTEN_STRUCT(task_struct,last_wakee);
+		AGGREGATE_FLATTEN_STRUCT(task_struct,real_parent);
+		AGGREGATE_FLATTEN_STRUCT(task_struct,parent);
+		AGGREGATE_FLATTEN_STRUCT(task_struct,group_leader);
+		AGGREGATE_FLATTEN_STRUCT(task_struct,pi_top_task);
+		AGGREGATE_FLATTEN_STRUCT(task_struct,oom_reaper_list);
 );
 
 static int kflat_currenttask_test(struct kflat *kflat, int debug_flag) {
 
 	int err = 0;
+	struct task_struct* t;
 
 	flatten_init(kflat);
 	flatten_set_debug_flag(kflat,debug_flag);
 
-	struct task_struct* t = current;
+	t = current;
 
+#if 0
 	FOR_ROOT_POINTER(t,
 		UNDER_ITER_HARNESS(
 			FLATTEN_STRUCT_ITER(task_struct, t);
 		);
+	);
+#endif
+
+	FOR_ROOT_POINTER(t,
+		FLATTEN_STRUCT(task_struct, t);
 	);
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
@@ -452,6 +706,8 @@ enum KFLAT_TEST_CASE {
 	POINTER=3<<2,
 	CURRENTTASK=4<<2,
 	SIMPLE=5<<2,
+	OVERLAPLIST=6<<2,
+	OVERLAPPTR=7<<2,
 };
 
 #include "kflat_test_data.h"
@@ -495,6 +751,28 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 	if ((arg&(~0x3))==CURRENTTASK) { /* Always iterative (?) */
 		err = kflat_currenttask_test(kflat,arg&0x01);
 		if (err) return err;
+	}
+
+	if ((arg&(~0x3))==OVERLAPLIST) {
+		if ((arg&2)==0) {
+			err = kflat_overlaplist_test(kflat,arg&0x01);
+			if (err) return err;
+		}
+		else {
+			err = kflat_overlaplist_test_iter(kflat,arg&0x01);
+			if (err) return err;
+		}
+	}
+
+	if ((arg&(~0x3))==OVERLAPPTR) {
+		if ((arg&2)==0) {
+			err = kflat_overlapptr_test(kflat,arg&0x01);
+			if (err) return err;
+		}
+		else {
+			err = kflat_overlapptr_test_iter(kflat,arg&0x01);
+			if (err) return err;
+		}
 	}
 
 	return 0;
