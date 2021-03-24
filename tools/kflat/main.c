@@ -1,10 +1,11 @@
 #include <stdio.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <math.h>
 #include <sys/time.h>
+#include "aot.h"
+#include "stringset.h"
 
 #define TIME_MARK_START(start_marker)		\
 		struct timeval  tv_mark_##start_marker;	\
@@ -38,6 +39,8 @@ struct blstream {
 	size_t alignment;
 };
 
+/* We got def from aot.h. */
+/*
 #define _ALIGNAS(n)	__attribute__((aligned(n)))
 #define RB_NODE_ALIGN	(sizeof(long))
 
@@ -50,6 +53,7 @@ struct _ALIGNAS(RB_NODE_ALIGN) rb_node {
 struct rb_root {
 	struct rb_node *rb_node;
 };
+*/
 
 /* Root address list */
 struct root_addrnode {
@@ -211,6 +215,35 @@ struct A {
 	struct B* pB;
 };
 
+struct my_list_head {
+	struct my_list_head* prev;
+	struct my_list_head* next;
+};
+
+struct intermediate {
+	struct my_list_head* plh;
+};
+
+struct my_task_struct {
+	int pid;
+	struct intermediate* im;
+	struct my_list_head u;
+	float w;
+};
+
+typedef struct struct_B {
+	int i;
+} my_B;
+
+typedef struct struct_A {
+	unsigned long ul;
+	my_B* pB0;
+	my_B* pB1;
+	my_B* pB2;
+	my_B* pB3;
+	char* p;
+} /*__attribute__((aligned(64)))*/ my_A;
+
 int main(int argc, char* argv[]) {
 
 	FILE* in = fopen(argv[1], "r");
@@ -266,7 +299,29 @@ int main(int argc, char* argv[]) {
 			printf("Half of the circumference: %.17f\n", circumference / 2);
 		}
 		else if (!strcmp(argv[2],"CURRENTTASK")) {
-			
+			printf("sizeof(struct task_struct): %zu\n",sizeof(struct task_struct));
+		}
+		else if (!strcmp(argv[2],"OVERLAPLIST")) {
+			struct my_task_struct *T = ROOT_POINTER_NEXT(struct my_task_struct*);
+			printf("pid: %d\n",T->pid);
+			printf("T: %lx\n",(uintptr_t)T);
+			printf("T->im->plh: %lx\n",(uintptr_t)T->im->plh);
+			printf("T->u.prev: %lx\n",(uintptr_t)T->u.prev);
+			printf("T->u.next: %lx\n",(uintptr_t)T->u.next);
+			printf("w: %f\n",T->w);
+		}
+		else if (!strcmp(argv[2],"OVERLAPPTR")) {
+			unsigned char* p = ROOT_POINTER_NEXT(unsigned char*);
+			(void)p;
+			my_A* pA = ROOT_POINTER_NEXT(my_A*);
+
+			printf("%d %d %d %d\n",pA->pB0->i,pA->pB1->i,pA->pB2->i,pA->pB3->i);
+			printf("%lx\n",(uintptr_t)pA->p);
+			printf("%s\n",pA->p);
+		}
+		else if (!strcmp(argv[2],"STRINGSET")) {
+			const struct rb_root* root = ROOT_POINTER_NEXT(const struct rb_root*);
+			stringset_print(root);
 		}
 	}
 
