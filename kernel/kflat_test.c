@@ -640,6 +640,7 @@ static int kflat_stringset_test(struct kflat *kflat, size_t num_strings, int deb
 			s[i] = chars[u%(sizeof chars - 1)];
 		}
 		stringset_insert(s);
+		flat_infos("[%s]\n",s);
 		libflat_free(s);
 	}
 
@@ -651,6 +652,8 @@ static int kflat_stringset_test(struct kflat *kflat, size_t num_strings, int deb
 	FOR_ROOT_POINTER(&stringset_root,
 		FLATTEN_STRUCT(rb_root,&stringset_root);
 	);
+
+	stringset_destroy(&stringset_root);
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
 	if (!kflat->errno) {

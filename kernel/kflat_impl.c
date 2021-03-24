@@ -251,10 +251,12 @@ void binary_stream_update_pointers(struct kflat* kflat) {
 	int count=0;
 	while(p) {
     	struct fixup_set_node* node = (struct fixup_set_node*)p;
-    	void* newptr = (unsigned char*)node->ptr->node->storage->index+node->ptr->offset;
-    	DBGS("@ ptr update at ((%p)%p:%zu) : %p => %p\n",node->inode,(void*)node->inode->start,node->offset,
-    			newptr,(void*)(((unsigned char*)node->inode->storage->data)+node->offset));
-    	memcpy(&((unsigned char*)node->inode->storage->data)[node->offset],&newptr,sizeof(void*));
+    	if (node->ptr) {
+			void* newptr = (unsigned char*)node->ptr->node->storage->index+node->ptr->offset;
+			DBGS("@ ptr update at ((%p)%p:%zu) : %p => %p\n",node->inode,(void*)node->inode->start,node->offset,
+					newptr,(void*)(((unsigned char*)node->inode->storage->data)+node->offset));
+			memcpy(&((unsigned char*)node->inode->storage->data)[node->offset],&newptr,sizeof(void*));
+    	}
     	p = rb_next(p);
     	count++;
     }
@@ -351,7 +353,7 @@ int bqueue_pop_front(struct bqueue* q, void* m, size_t s) {
     return 0;
 }
 
-#define ADDR_KEY(p)	((p)->inode->start + (p)->offset)
+#define ADDR_KEY(p)	((((p)->inode)?((p)->inode->start):0) + (p)->offset)
 
 static struct fixup_set_node* create_fixup_set_node_element(struct flat_node* node, size_t offset, struct flatten_pointer* ptr) {
 	struct fixup_set_node* n = libflat_zalloc(sizeof(struct fixup_set_node),1);
@@ -374,9 +376,54 @@ struct fixup_set_node *fixup_set_search(struct kflat* kflat, uintptr_t v) {
 		else if (v > ADDR_KEY(data)) {
 			node = node->rb_right;
 		}
-		else
+		else {
+			DBGS("fixup_set_search(%lx): (%p:%zu,%p)\n",v,data->inode,data->offset,data->ptr);
 			return data;
+		}
 	}
+
+	DBGS("fixup_set_search(%lx): 0\n",v);
+	return 0;
+}
+
+int fixup_set_reserve_address(struct kflat* kflat, uintptr_t addr) {
+
+	struct fixup_set_node *data;
+	struct rb_node **new, *parent;
+	struct fixup_set_node* inode;
+
+	DBGS("fixup_set_reserve_address(%lx)\n",addr);
+
+	inode = fixup_set_search(kflat,addr);
+
+	if (inode) {
+		return EEXIST;
+	}
+
+	new = &(kflat->FLCTRL.fixup_set_root.rb_root.rb_node);
+	parent = 0;
+
+	data = create_fixup_set_node_element(0,addr,0);
+	if (!data) {
+		return ENOMEM;
+	}
+
+	/* Figure out where to put new node */
+	while (*new) {
+		struct fixup_set_node *this = container_of(*new, struct fixup_set_node, node);
+
+		parent = *new;
+		if (data->offset < ADDR_KEY(this))
+			new = &((*new)->rb_left);
+		else if (data->offset > ADDR_KEY(this))
+			new = &((*new)->rb_right);
+		else
+			return EEXIST;
+	}
+
+	/* Add new node and rebalance tree. */
+	rb_link_node(&data->node, parent, new);
+	rb_insert_color(&data->node, &kflat->FLCTRL.fixup_set_root.rb_root);
 
 	return 0;
 }
@@ -390,7 +437,7 @@ int fixup_set_reserve(struct kflat* kflat, struct flat_node* node, size_t offset
 	DBGS("fixup_set_reserve(%lx,%zu)\n",(uintptr_t)node,offset);
 
 	if (node==0) {
-		return ENOKEY;
+		return EINVAL;
 	}
 
 	inode = fixup_set_search(kflat,node->start+offset);
@@ -435,13 +482,22 @@ int fixup_set_update(struct kflat* kflat, struct flat_node* node, size_t offset,
 
 	if (node==0) {
 		libflat_free(ptr);
-		return ENOKEY;
+		return EINVAL;
 	}
 
 	inode = fixup_set_search(kflat,node->start+offset);
 
 	if (!inode) {
 		return ENOKEY;
+	}
+
+	if (!inode->inode) {
+		if ((node->start + offset)!=inode->offset) {
+			flat_err("node address not matching reserved offset");
+			return EFAULT;
+		}
+		rb_erase(&inode->node, &kflat->FLCTRL.fixup_set_root.rb_root);
+		return fixup_set_insert(kflat,node,offset,ptr);
 	}
 
 	inode->ptr = ptr;
@@ -457,17 +513,17 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 	DBGS("fixup_set_insert(%lx,%zu,%lx)\n",(uintptr_t)node,offset,(uintptr_t)ptr);
 
 	if (!ptr) {
-		return EFAULT;
+		return EINVAL;
 	}
 
 	if (node==0) {
 		libflat_free(ptr);
-		return ENOKEY;
+		return EINVAL;
 	}
 
 	inode = fixup_set_search(kflat,node->start+offset);
 
-	if (inode) {
+	if (inode && inode->inode) {
 		if ((inode->ptr->node->start+inode->ptr->offset)!=(ptr->node->start+ptr->offset)) {
 			flat_err("Multiple pointer mismatch for the same storage");
 			libflat_free(ptr);
@@ -475,6 +531,10 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 		}
 		libflat_free(ptr);
 		return EEXIST;
+	}
+
+	if (inode) {
+		return fixup_set_update(kflat,node, offset, ptr);
 	}
 
 	data = create_fixup_set_node_element(node,offset,ptr);
@@ -510,13 +570,27 @@ void fixup_set_print(struct kflat* kflat) {
 	flat_info("[\n");
 	while(p) {
     	struct fixup_set_node* node = (struct fixup_set_node*)p;
-    	uintptr_t newptr = node->ptr->node->storage->index+node->ptr->offset;
-    	uintptr_t origptr = node->inode->storage->index+node->offset;
-    	flat_infos(" %zu: (%p:%zu)->(%p:%zu) | %zu <- %zu\n",
-    			node->inode->storage->index,
-				node->inode,node->offset,
-				node->ptr->node,node->ptr->offset,
-				origptr,newptr);
+    	if (node->ptr) {
+			uintptr_t newptr = node->ptr->node->storage->index+node->ptr->offset;
+			uintptr_t origptr = node->inode->storage->index+node->offset;
+			flat_infos(" %zu: (%p:%zu)->(%p:%zu) | %zu <- %zu\n",
+					node->inode->storage->index,
+					node->inode,node->offset,
+					node->ptr->node,node->ptr->offset,
+					origptr,newptr);
+    	}
+    	else if (node->inode) {
+    		/* Reserved node but never filled */
+    		uintptr_t origptr = node->inode->storage->index+node->offset;
+    		flat_infos(" %zu: (%p:%zu)-> 0 | %zu\n",
+					node->inode->storage->index,
+					node->inode,node->offset,
+					origptr);
+    	}
+    	else {
+    		/* Reserved for dummy pointer */
+    		flat_infos(" (%p)-> 0 | \n",(void*)node->offset);
+    	}
     	p = rb_next(p);
     }
 	flat_info("]\n");
@@ -526,8 +600,10 @@ int fixup_set_write(struct kflat* kflat, size_t* wcounter_p) {
 	struct rb_node * p = rb_first(&kflat->FLCTRL.fixup_set_root.rb_root);
 	while(p) {
     	struct fixup_set_node* node = (struct fixup_set_node*)p;
-    	size_t origptr = node->inode->storage->index+node->offset;
-    	FLATTEN_WRITE_ONCE(&origptr,sizeof(size_t),wcounter_p);
+    	if (node->ptr) {
+			size_t origptr = node->inode->storage->index+node->offset;
+			FLATTEN_WRITE_ONCE(&origptr,sizeof(size_t),wcounter_p);
+    	}
     	p = rb_next(p);
     }
     return 0;
@@ -537,7 +613,10 @@ size_t fixup_set_count(struct kflat* kflat) {
 	struct rb_node * p = rb_first(&kflat->FLCTRL.fixup_set_root.rb_root);
 	size_t count=0;
 	while(p) {
-		count++;
+		struct fixup_set_node* node = (struct fixup_set_node*)p;
+		if (node->ptr) {
+			count++;
+		}
     	p = rb_next(p);
     }
     return count;
@@ -549,7 +628,9 @@ void fixup_set_destroy(struct kflat* kflat) {
 		struct fixup_set_node* node = (struct fixup_set_node*)p;
 		rb_erase(p, &kflat->FLCTRL.fixup_set_root.rb_root);
 		p = rb_next(p);
-		libflat_free(node->ptr);
+		if (node->ptr) {
+			libflat_free(node->ptr);
+		}
 		libflat_free(node);
 	};
 }
