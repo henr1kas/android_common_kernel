@@ -478,7 +478,9 @@ int fixup_set_update(struct kflat* kflat, struct flat_node* node, size_t offset,
 
 	struct fixup_set_node* inode;
 
-	DBGS("fixup_set_update(%lx,%zu,%lx)\n",(uintptr_t)node,offset,(uintptr_t)ptr);
+	DBGS("fixup_set_update(%lx[%lx:%zu],%zu,%lx)\n",(uintptr_t)node,
+			(node)?(node->start):0,(node)?(node->last-node->start+1):0,
+			offset,(uintptr_t)ptr);
 
 	if (node==0) {
 		libflat_free(ptr);
@@ -510,7 +512,9 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 	struct fixup_set_node *data;
 	struct rb_node **new, *parent;
 
-	DBGS("fixup_set_insert(%lx,%zu,%lx)\n",(uintptr_t)node,offset,(uintptr_t)ptr);
+	DBGS("fixup_set_insert(%lx[%lx:%zu],%zu,%lx)\n",(uintptr_t)node,
+			(node)?(node->start):0,(node)?(node->last-node->start+1):0,
+			offset,(uintptr_t)ptr);
 
 	if (!ptr) {
 		return EINVAL;

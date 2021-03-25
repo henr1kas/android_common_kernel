@@ -626,6 +626,22 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(rb_root,
 	AGGREGATE_FLATTEN_STRUCT_ITER(string_node,rb_node);
 );
 
+void print_string_node_tree(struct rb_node* node, int depth) {
+
+	const char* s = "          ";
+	const char* ps = &s[10];
+	struct string_node* this = container_of(node, struct string_node, node);
+
+	flat_infos("%s(%lx)[C:%lx][L:%lx][R:%lx]: %s\n",
+			ps-2*depth,(uintptr_t)node,node->__rb_parent_color,(uintptr_t)node->rb_left,(uintptr_t)node->rb_right,this->s);
+	if (node->rb_left) {
+		print_string_node_tree(node->rb_left,depth+1);
+	}
+	if (node->rb_right) {
+		print_string_node_tree(node->rb_right,depth+1);
+	}
+}
+
 static int kflat_stringset_test(struct kflat *kflat, size_t num_strings, int debug_flag) {
 
 	static const char chars[] = "ABCDEFGHIJ";
@@ -640,11 +656,10 @@ static int kflat_stringset_test(struct kflat *kflat, size_t num_strings, int deb
 			s[i] = chars[u%(sizeof chars - 1)];
 		}
 		stringset_insert(s);
-		flat_infos("[%s]\n",s);
 		libflat_free(s);
 	}
 
-	flat_infos("@String set size: %zu\n",stringset_count(&stringset_root));
+	flat_infos("String set size: %zu\n",stringset_count(&stringset_root));
 
 	flatten_init(kflat);
 	flatten_set_debug_flag(kflat,debug_flag);
