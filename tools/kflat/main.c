@@ -93,6 +93,7 @@ struct FLCONTROL FLCTRL = {
 #define FLATTEN_MAGIC 0x464c415454454e00ULL
 
 #define ROOT_POINTER_NEXT(PTRTYPE)	((PTRTYPE)(root_pointer_next()))
+#define ROOT_POINTER_SEQ(PTRTYPE,n)	((PTRTYPE)(root_pointer_seq(n)))
 #define FLATTEN_MEMORY_START	((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t))
 
 void* root_pointer_next() {
@@ -103,6 +104,30 @@ void* root_pointer_next() {
 		FLCTRL.last_accessed_root = FLCTRL.rhead;
 	}
 	else {
+		if (FLCTRL.last_accessed_root->next) {
+			FLCTRL.last_accessed_root = FLCTRL.last_accessed_root->next;
+		}
+		else {
+			assert(0);
+		}
+	}
+
+	if (FLCTRL.last_accessed_root->root_addr==(size_t)-1) {
+		return 0;
+	}
+	else {
+		return (FLATTEN_MEMORY_START+FLCTRL.last_accessed_root->root_addr);
+	}
+}
+
+void* root_pointer_seq(size_t index) {
+
+	assert(FLCTRL.rhead!=0);
+
+	FLCTRL.last_accessed_root = FLCTRL.rhead;
+
+	size_t i=0;
+	for (i=0; i<index; ++i) {
 		if (FLCTRL.last_accessed_root->next) {
 			FLCTRL.last_accessed_root = FLCTRL.last_accessed_root->next;
 		}
@@ -321,7 +346,12 @@ int main(int argc, char* argv[]) {
 		}
 		else if (!strcmp(argv[2],"STRINGSET")) {
 			const struct rb_root* root = ROOT_POINTER_NEXT(const struct rb_root*);
-			stringset_print(root);
+			printf("stringset size: %zu\n",stringset_count(root));
+			stringset_nprint(root,10);
+		}
+		else if (!strcmp(argv[2],"POINTER")) {
+			double*** ehhh = ROOT_POINTER_SEQ(double***, 0);
+			printf("The magic answer to the ultimate question of life?: %f\n", ***ehhh);
 		}
 	}
 

@@ -534,7 +534,6 @@ static int kflat_pointer_test(struct kflat *kflat, int debug_flag) {
 
 }
 
-#if 0
 FUNCTION_DECLARE_FLATTEN_STRUCT_ITER(task_struct);
 
 FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(task_struct,
@@ -545,7 +544,6 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(task_struct,
 		AGGREGATE_FLATTEN_STRUCT_ITER(task_struct,pi_top_task);
 		AGGREGATE_FLATTEN_STRUCT_ITER(task_struct,oom_reaper_list);
 );
-#endif
 
 FUNCTION_DECLARE_FLATTEN_STRUCT(task_struct);
 
@@ -568,17 +566,19 @@ static int kflat_currenttask_test(struct kflat *kflat, int debug_flag) {
 
 	t = current;
 
-#if 0
+//#define ITER
+
+#ifdef ITER
 	FOR_ROOT_POINTER(t,
 		UNDER_ITER_HARNESS(
 			FLATTEN_STRUCT_ITER(task_struct, t);
 		);
 	);
-#endif
-
+#else
 	FOR_ROOT_POINTER(t,
 		FLATTEN_STRUCT(task_struct, t);
 	);
+#endif
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
 	if (!kflat->errno) {
@@ -696,7 +696,7 @@ static int kflat_stringset_test_iter(struct kflat *kflat, size_t num_strings, in
 		libflat_free(s);
 	}
 
-	flat_infos("@String set size: %zu\n",stringset_count(&stringset_root));
+	flat_infos("String set size: %zu\n",stringset_count(&stringset_root));
 
 	flatten_init(kflat);
 	flatten_set_debug_flag(kflat,debug_flag);
@@ -756,7 +756,7 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 			if (err) return err;
 		}
 		else {
-			err = kflat_stringset_test_iter(kflat,500,arg&0x01);
+			err = kflat_stringset_test_iter(kflat,50000,arg&0x01);
 			if (err) return err;
 		}
 	}
@@ -766,7 +766,7 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 		if (err) return err;
 	}
 
-	if ((arg&(~0x3))==CURRENTTASK) { /* Always iterative (?) */
+	if ((arg&(~0x3))==CURRENTTASK) { /* Always iterative */
 		err = kflat_currenttask_test(kflat,arg&0x01);
 		if (err) return err;
 	}

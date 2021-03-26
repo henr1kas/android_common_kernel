@@ -106,6 +106,24 @@ static void stringset_print(const struct rb_root* root) {
 	printf("]\n");
 }
 
+static void stringset_nprint(const struct rb_root* root, size_t n) {
+
+	struct rb_node * p = rb_first(root);
+	printf("[\n");
+	size_t i=0;
+	while(p) {
+		struct string_node* data = (struct string_node*)p;
+		printf("  %s\n",data->s);
+		p = rb_next(p);
+		if (p && (i>=n-1)) {
+			printf("  ...\n");
+			break;
+		}
+		++i;
+	}
+	printf("]\n");
+}
+
 static void stringset_destroy(struct rb_root* root) {
 
     struct rb_node * p = rb_first(root);
