@@ -4,7 +4,84 @@
 #include <assert.h>
 #include <math.h>
 #include <sys/time.h>
+#include <set>
+
+#if 0
 #include "aot.h"
+#else
+#ifdef __linux__
+#define _ALIGNAS(n)	__attribute__((aligned(n)))
+#define RB_NODE_ALIGN	(sizeof(long))
+#else
+#ifdef _WIN32
+#define _ALIGNAS(n)	__declspec(align(n))
+#ifdef _M_IX86
+#define RB_NODE_ALIGN	4
+#elif defined _M_X64
+#define RB_NODE_ALIGN	8
+#endif
+#endif	/* _WIN32 */
+#endif /* __linux__ */
+
+#ifdef __linux__
+#include <alloca.h>
+#define ALLOCA(x)	alloca(x)
+#else
+#ifdef _WIN32
+#include <malloc.h>
+#define ALLOCA(x)	_malloca(x)
+#endif
+#endif
+
+#ifdef __linux__
+#define container_of(ptr, type, member) ({			\
+	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+	(type *)( (char *)__mptr - offsetof(type,member) );})
+#else
+#ifdef _WIN32
+#define container_of(ptr, type, member) (type *)( (char *)(ptr) - offsetof(type,member) )
+#endif
+#endif
+
+struct _ALIGNAS(RB_NODE_ALIGN) rb_node {
+	uintptr_t  __rb_parent_color;
+	struct rb_node *rb_right;
+	struct rb_node *rb_left;
+};
+/* The alignment might seem pointless, but allegedly CRIS needs it */
+
+struct rb_root {
+	struct rb_node *rb_node;
+};
+
+void* malloc (size_t size);
+void* calloc (size_t num, size_t size);
+void free(void *ptr);
+
+
+struct task_struct {
+	unsigned char padding0[60];
+	unsigned int cpu;
+	unsigned char padding1[16];
+	struct task_struct* last_wakee;
+	unsigned char padding2[12];
+	int prio;
+	unsigned char padding3[1248];
+	int pid;
+	int tgid;
+	unsigned char padding4[8];
+	struct task_struct* real_parent;
+	struct task_struct* parent;
+	unsigned char padding5[32];
+	struct task_struct* group_leader;
+	unsigned char padding6[608];
+	struct task_struct* pi_top_task;
+	unsigned char padding7[592];
+	struct task_struct* oom_reaper_list;
+	unsigned char padding8[4464];
+} __attribute__((packed));
+#endif
+
 #include "stringset.h"
 
 #define TIME_MARK_START(start_marker)		\
@@ -84,10 +161,10 @@ struct FLCONTROL FLCTRL = {
 		.imap_root = RB_ROOT,
 		.rhead = 0,
 		.rtail = 0,
-		.mem = 0,
 		.last_accessed_root=0,
 		.debug_flag=0,
-		.option=0
+		.option=0,
+		.mem = 0,
 };
 
 #define FLATTEN_MAGIC 0x464c415454454e00ULL
@@ -145,7 +222,7 @@ void* root_pointer_seq(size_t index) {
 }
 
 void root_addr_append(uintptr_t root_addr) {
-    struct root_addrnode* v = calloc(1,sizeof(struct root_addrnode));
+    struct root_addrnode* v = (struct root_addrnode*)calloc(1,sizeof(struct root_addrnode));
     assert(v!=0);
     v->root_addr = root_addr;
     if (!FLCTRL.rhead) {
@@ -269,6 +346,43 @@ typedef struct struct_A {
 	char* p;
 } /*__attribute__((aligned(64)))*/ my_A;
 
+void print_struct_task_offsets(struct task_struct* t) {
+	printf("task_struct.last_wakee: %zu\n",offsetof(struct task_struct,last_wakee));
+	printf("task_struct.real_parent: %zu\n",offsetof(struct task_struct,real_parent));
+	printf("task_struct.parent: %zu\n",offsetof(struct task_struct,parent));
+	printf("task_struct.group_leader: %zu\n",offsetof(struct task_struct,group_leader));
+	printf("task_struct.pi_top_task: %zu\n",offsetof(struct task_struct,pi_top_task));
+	printf("task_struct.oom_reaper_list: %zu\n",offsetof(struct task_struct,oom_reaper_list));
+	printf("task_struct.pid: %zu\n",offsetof(struct task_struct,pid));
+	printf("task_struct.tgid: %zu\n",offsetof(struct task_struct,tgid));
+	printf("task_struct.prio: %zu\n",offsetof(struct task_struct,prio));
+	printf("task_struct.cpu: %zu\n",offsetof(struct task_struct,cpu));
+	printf("task_struct size: %zu\n",sizeof(struct task_struct));
+}
+
+void walk_print_task_struct(struct task_struct* T,std::set<struct task_struct*>& visited) {
+	visited.insert(T);
+	printf("T[%d:%d], cpu %u, prio %d\n",T->pid,T->tgid,T->cpu,T->prio);
+	if ((T->last_wakee!=0)&&(visited.find(T->last_wakee)==visited.end())) {
+		walk_print_task_struct(T->last_wakee,visited);
+	}
+	if ((T->real_parent!=0)&&(visited.find(T->real_parent)==visited.end())) {
+		walk_print_task_struct(T->real_parent,visited);
+	}
+	if ((T->parent!=0)&&(visited.find(T->parent)==visited.end())) {
+		walk_print_task_struct(T->parent,visited);
+	}
+	if ((T->group_leader!=0)&&(visited.find(T->group_leader)==visited.end())) {
+		walk_print_task_struct(T->group_leader,visited);
+	}
+	if ((T->pi_top_task!=0)&&(visited.find(T->pi_top_task)==visited.end())) {
+		walk_print_task_struct(T->pi_top_task,visited);
+	}
+	if ((T->oom_reaper_list!=0)&&(visited.find(T->oom_reaper_list)==visited.end())) {
+		walk_print_task_struct(T->oom_reaper_list,visited);
+	}
+}
+
 int main(int argc, char* argv[]) {
 
 	FILE* in = fopen(argv[1], "r");
@@ -324,7 +438,12 @@ int main(int argc, char* argv[]) {
 			printf("Half of the circumference: %.17f\n", circumference / 2);
 		}
 		else if (!strcmp(argv[2],"CURRENTTASK")) {
-			printf("sizeof(struct task_struct): %zu\n",sizeof(struct task_struct));
+			struct task_struct *T = ROOT_POINTER_NEXT(struct task_struct*);
+			print_struct_task_offsets(T);
+			printf("\n");
+			printf("# root PID: %d\n",T->pid);
+			std::set<struct task_struct*> visited;
+			walk_print_task_struct(T,visited);
 		}
 		else if (!strcmp(argv[2],"OVERLAPLIST")) {
 			struct my_task_struct *T = ROOT_POINTER_NEXT(struct my_task_struct*);

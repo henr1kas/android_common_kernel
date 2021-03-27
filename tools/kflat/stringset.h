@@ -67,19 +67,19 @@ static struct string_node* stringset_search(const char* s) {
 
 static int stringset_insert(const char* s) {
 
-	struct string_node* data = calloc(1,sizeof(struct string_node));
+	struct string_node* data = (struct string_node*)calloc(1,sizeof(struct string_node));
 	data->s = strdup(s);
-	struct rb_node **new = &(stringset_root.rb_node), *parent = 0;
+	struct rb_node **_new = &(stringset_root.rb_node), *parent = 0;
 
 	/* Figure out where to put new node */
-	while (*new) {
-		struct string_node* this = container_of(*new, struct string_node, node);
+	while (*_new) {
+		struct string_node* _this = container_of(*_new, struct string_node, node);
 
-		parent = *new;
-		if (strcmp(data->s,this->s)<0)
-			new = &((*new)->rb_left);
-		else if (strcmp(data->s,this->s)>0)
-			new = &((*new)->rb_right);
+		parent = *_new;
+		if (strcmp(data->s,_this->s)<0)
+			_new = &((*_new)->rb_left);
+		else if (strcmp(data->s,_this->s)>0)
+			_new = &((*_new)->rb_right);
 		else {
 		    free((void*)data->s);
 		    free(data);
@@ -88,7 +88,7 @@ static int stringset_insert(const char* s) {
 	}
 
 	/* Add new node and rebalance tree. */
-	rb_link_node(&data->node, parent, new);
+	rb_link_node(&data->node, parent, _new);
 	rb_insert_color(&data->node, &stringset_root);
 
 	return 1;

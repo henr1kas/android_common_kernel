@@ -195,7 +195,7 @@ void binary_stream_destroy(struct kflat* kflat) {
 
 static void binary_stream_element_print(struct blstream* p) {
 	size_t i;
-	flat_infos("(%zu)(%zu){%zu}{%p}[ ",p->index,p->alignment,p->size,(void*)p);
+	flat_infos("(%zu)(%zu){%zu}{%lx}[ ",p->index,p->alignment,p->size,(unsigned long)p);
 	for (i=0; i<p->size; ++i) {
 		flat_infos("%02x ",((unsigned char*)(p->data))[i]);
 	}
@@ -253,8 +253,8 @@ void binary_stream_update_pointers(struct kflat* kflat) {
     	struct fixup_set_node* node = (struct fixup_set_node*)p;
     	if (node->ptr) {
 			void* newptr = (unsigned char*)node->ptr->node->storage->index+node->ptr->offset;
-			DBGS("@ ptr update at ((%p)%p:%zu) : %p => %p\n",node->inode,(void*)node->inode->start,node->offset,
-					newptr,(void*)(((unsigned char*)node->inode->storage->data)+node->offset));
+			DBGS("@ ptr update at ((%lx)%lx:%zu) : %lx => %lx\n",(unsigned long)node->inode,(unsigned long)node->inode->start,node->offset,
+					(unsigned long)newptr,(unsigned long)(((unsigned char*)node->inode->storage->data)+node->offset));
 			memcpy(&((unsigned char*)node->inode->storage->data)[node->offset],&newptr,sizeof(void*));
     	}
     	p = rb_next(p);
@@ -377,7 +377,7 @@ struct fixup_set_node *fixup_set_search(struct kflat* kflat, uintptr_t v) {
 			node = node->rb_right;
 		}
 		else {
-			DBGS("fixup_set_search(%lx): (%p:%zu,%p)\n",v,data->inode,data->offset,data->ptr);
+			DBGS("fixup_set_search(%lx): (%lx:%zu,%lx)\n",v,(unsigned long)data->inode,data->offset,(unsigned long)data->ptr);
 			return data;
 		}
 	}
@@ -577,23 +577,23 @@ void fixup_set_print(struct kflat* kflat) {
     	if (node->ptr) {
 			uintptr_t newptr = node->ptr->node->storage->index+node->ptr->offset;
 			uintptr_t origptr = node->inode->storage->index+node->offset;
-			flat_infos(" %zu: (%p:%zu)->(%p:%zu) | %zu <- %zu\n",
+			flat_infos(" %zu: (%lx:%zu)->(%lx:%zu) | %zu <- %zu\n",
 					node->inode->storage->index,
-					node->inode,node->offset,
-					node->ptr->node,node->ptr->offset,
+					(unsigned long)node->inode,node->offset,
+					(unsigned long)node->ptr->node,node->ptr->offset,
 					origptr,newptr);
     	}
     	else if (node->inode) {
     		/* Reserved node but never filled */
     		uintptr_t origptr = node->inode->storage->index+node->offset;
-    		flat_infos(" %zu: (%p:%zu)-> 0 | %zu\n",
+    		flat_infos(" %zu: (%lx:%zu)-> 0 | %zu\n",
 					node->inode->storage->index,
-					node->inode,node->offset,
+					(unsigned long)node->inode,node->offset,
 					origptr);
     	}
     	else {
     		/* Reserved for dummy pointer */
-    		flat_infos(" (%p)-> 0 | \n",(void*)node->offset);
+    		flat_infos(" (%lx)-> 0 | \n",(unsigned long)node->offset);
     	}
     	p = rb_next(p);
     }
@@ -671,7 +671,8 @@ void interval_tree_print(struct rb_root *root) {
 	size_t total_size=0;
 	while(p) {
 		struct flat_node* node = (struct flat_node*)p;
-		flat_infos("(%p)[%p:%p](%zu){%p}\n",node,(void*)node->start,(void*)node->last,node->last-node->start+1,(void*)node->storage);
+		flat_infos("(%lx)[%lx:%lx](%zu){%lx}\n",(unsigned long)node,(unsigned long)node->start,(unsigned long)node->last,
+				node->last-node->start+1,(unsigned long)node->storage);
 		total_size+=node->last-node->start+1;
 		p = rb_next(p);
 	};

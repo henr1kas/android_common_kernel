@@ -556,6 +556,20 @@ FUNCTION_DEFINE_FLATTEN_STRUCT(task_struct,
 		AGGREGATE_FLATTEN_STRUCT(task_struct,oom_reaper_list);
 );
 
+void print_struct_task_offsets(struct task_struct* t) {
+	flat_infos("task_struct.last_wakee: %zu\n",offsetof(struct task_struct,last_wakee));
+	flat_infos("task_struct.real_parent: %zu\n",offsetof(struct task_struct,real_parent));
+	flat_infos("task_struct.parent: %zu\n",offsetof(struct task_struct,parent));
+	flat_infos("task_struct.group_leader: %zu\n",offsetof(struct task_struct,group_leader));
+	flat_infos("task_struct.pi_top_task: %zu\n",offsetof(struct task_struct,pi_top_task));
+	flat_infos("task_struct.oom_reaper_list: %zu\n",offsetof(struct task_struct,oom_reaper_list));
+	flat_infos("task_struct.pid: %zu\n",offsetof(struct task_struct,pid));
+	flat_infos("task_struct.tgid: %zu\n",offsetof(struct task_struct,tgid));
+	flat_infos("task_struct.prio: %zu\n",offsetof(struct task_struct,prio));
+	flat_infos("task_struct.cpu: %zu\n",offsetof(struct task_struct,cpu));
+	flat_infos("task_struct size: %zu\n",sizeof(struct task_struct));
+}
+
 static int kflat_currenttask_test(struct kflat *kflat, int debug_flag) {
 
 	int err = 0;
@@ -565,20 +579,38 @@ static int kflat_currenttask_test(struct kflat *kflat, int debug_flag) {
 	flatten_set_debug_flag(kflat,debug_flag);
 
 	t = current;
+	print_struct_task_offsets(t);
 
-//#define ITER
+	FOR_ROOT_POINTER(t,
+		FLATTEN_STRUCT(task_struct, t);
+	);
 
-#ifdef ITER
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
+static int kflat_currenttask_test_iter(struct kflat *kflat, int debug_flag) {
+
+	int err = 0;
+	struct task_struct* t;
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	t = current;
+	print_struct_task_offsets(t);
+
 	FOR_ROOT_POINTER(t,
 		UNDER_ITER_HARNESS(
 			FLATTEN_STRUCT_ITER(task_struct, t);
 		);
 	);
-#else
-	FOR_ROOT_POINTER(t,
-		FLATTEN_STRUCT(task_struct, t);
-	);
-#endif
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
 	if (!kflat->errno) {
@@ -766,9 +798,15 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 		if (err) return err;
 	}
 
-	if ((arg&(~0x3))==CURRENTTASK) { /* Always iterative */
-		err = kflat_currenttask_test(kflat,arg&0x01);
-		if (err) return err;
+	if ((arg&(~0x3))==CURRENTTASK) {
+		if ((arg&2)==0) {
+			err = kflat_currenttask_test(kflat,arg&0x01);
+			if (err) return err;
+		}
+		else {
+			err = kflat_currenttask_test_iter(kflat,arg&0x01);
+			if (err) return err;
+		}
 	}
 
 	if ((arg&(~0x3))==OVERLAPLIST) {
