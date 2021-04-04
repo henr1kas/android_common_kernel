@@ -463,7 +463,7 @@ int main(int argc, char* argv[]) {
 			printf("%lx\n",(uintptr_t)pA->p);
 			printf("%s\n",pA->p);
 		}
-		else if (!strcmp(argv[2],"STRINGSET")) {
+		else if ((!strcmp(argv[2],"STRINGSET"))||(!strcmp(argv[2],"STRINGSETM"))) {
 			const struct rb_root* root = ROOT_POINTER_NEXT(const struct rb_root*);
 			printf("stringset size: %zu\n",stringset_count(root));
 			stringset_nprint(root,10);
