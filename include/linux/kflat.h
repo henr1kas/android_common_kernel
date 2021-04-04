@@ -1989,6 +1989,6 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 #define FLATTEN_MEMORY_START	((unsigned char*)kflat->FLCTRL.mem+kflat->FLCTRL.HDR.ptr_count*sizeof(size_t))
 #define FLATTEN_MEMORY_END		(FLATTEN_MEMORY_START+kflat->FLCTRL.HDR.memory_size)
 
-#include <kflat_recipe.h>
+#define KFLAT_ACCESSOR kflat
 
 #endif /* _LINUX_KFLAT_H */
