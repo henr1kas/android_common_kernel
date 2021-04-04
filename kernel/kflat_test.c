@@ -748,6 +748,43 @@ static int kflat_stringset_test_iter(struct kflat *kflat, size_t num_strings, in
 	return err;
 }
 
+static int kflat_stringset_module_test(struct kflat *kflat, size_t num_strings, int debug_flag) {
+
+	static const char chars[] = "ABCDEFGHIJ";
+	unsigned i,j;
+	int err = 0;
+
+	for (j=0; j<num_strings; ++j) {
+		char* s = libflat_zalloc(1,sizeof chars);
+		for (i=0; i<sizeof chars - 1; ++i) {
+			unsigned char u;
+			get_random_bytes(&u,1);
+			s[i] = chars[u%(sizeof chars - 1)];
+		}
+		stringset_insert(s);
+		libflat_free(s);
+	}
+
+	flat_infos("String set size: %zu\n",stringset_count(&stringset_root));
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	FOR_ROOT_POINTER(&stringset_root,
+		UNDER_ITER_HARNESS(
+			FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER(rb_root,&stringset_root);
+		);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+}
+
 enum KFLAT_TEST_CASE {
 	DEBUG_FLAG=1,
 	TEST_ITER=2,
@@ -758,6 +795,7 @@ enum KFLAT_TEST_CASE {
 	SIMPLE=5<<2,
 	OVERLAPLIST=6<<2,
 	OVERLAPPTR=7<<2,
+	STRINGSETM=8<<2,
 };
 
 #include "kflat_test_data.h"
@@ -792,6 +830,11 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 			if (err) return err;
 		}
 	}
+
+	if ((arg&(~0x3))==STRINGSETM) {
+			err = kflat_stringset_module_test(kflat,50000,arg&0x01);
+			if (err) return err;
+		}
 
 	if ((arg&(~0x3))==POINTER) { /* Always recursive */
 		err = kflat_pointer_test(kflat,arg&0x01);

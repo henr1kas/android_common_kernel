@@ -124,6 +124,19 @@ struct flatten_base {};
 typedef struct flatten_pointer* (*flatten_struct_t)(struct kflat* kflat, const struct flatten_base*, size_t n, struct bqueue*);
 typedef struct flatten_pointer* (*flatten_struct_mixed_convert_t)(struct flatten_pointer*, const struct flatten_base*);
 
+typedef struct flatten_pointer* (*flatten_struct_f)(struct kflat* kflat, const void* _ptr, struct bqueue* __q);
+
+struct recipe_node* recipe_search(const char* s);
+int recipe_insert(const char* s, flatten_struct_f f);
+void recipe_destroy(struct rb_root* root);
+size_t recipe_count(const struct rb_root* root);
+
+struct recipe_node {
+	struct rb_node node;
+	char* s;
+	flatten_struct_f f;
+};
+
 struct flatten_job {
     struct flat_node* node;
     size_t offset;
@@ -925,6 +938,53 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 			}	\
         }   \
     } while(0)
+
+#define XSTR(s) STR(s)
+#define STR(s) #s
+
+#define FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER(T,p)	\
+	do {    \
+		struct recipe_node* rnode;	\
+		DBGTP(FLATTEN_STRUCT_ITER,T,p);  \
+		rnode = recipe_search(STR(S_##T));	\
+		if (!rnode) {	\
+			DBGS("FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER: recipe string not found (%s)\n",STR(S_##T));	\
+			KFLAT_ACCESSOR->errno = ENOENT;	\
+		}	\
+		else {	\
+			if (p&&(!KFLAT_ACCESSOR->errno)) {   \
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uintptr_t)p);	\
+				if (!__inode) {	\
+					int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)p);	\
+					if (err) {	\
+						DBGS("FLATTEN_STRUCT_ITER:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,rnode->f(KFLAT_ACCESSOR,(p),__q));	\
+						if ((err) && (err!=EINVAL) && (err!=EEXIST)) {	\
+							DBGS("FLATTEN_STRUCT_ITER:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)p,\
+							(uintptr_t)p+sizeof(struct T)-1);    \
+					if (__node==0) {	\
+						KFLAT_ACCESSOR->errno = EFAULT;	\
+					}	\
+					else {	\
+						int err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,make_flatten_pointer(__node,(uintptr_t)p-__node->start));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("FLATTEN_STRUCT_ITER:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+			}   \
+		}	\
+	} while(0)
 
 #define FLATTEN_STRUCT_TYPE_ITER(T,p)	\
 	do {    \

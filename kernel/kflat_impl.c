@@ -23,6 +23,88 @@
 #define START(node) ((node)->start)
 #define LAST(node)  ((node)->last)
 
+struct rb_root recipe_fns = RB_ROOT;
+EXPORT_SYMBOL(recipe_fns);
+
+struct recipe_node* recipe_search(const char* s) {
+
+	struct rb_node *node = recipe_fns.rb_node;
+
+	while (node) {
+		struct recipe_node* data = container_of(node, struct recipe_node, node);
+
+		if (strcmp(s,data->s)<0) {
+			node = node->rb_left;
+		}
+		else if (strcmp(s,data->s)>0) {
+			node = node->rb_right;
+		}
+		else
+			return data;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(recipe_search);
+
+int recipe_insert(const char* s, flatten_struct_f f) {
+
+	struct recipe_node* data = libflat_zalloc(1,sizeof(struct recipe_node));
+	struct rb_node **new, *parent = 0;
+	data->s = libflat_zalloc(1,strlen(s)+1);
+	strcpy(data->s,s);
+	data->f = f;
+	new = &(recipe_fns.rb_node);
+
+	/* Figure out where to put new node */
+	while (*new) {
+		struct recipe_node* this = container_of(*new, struct recipe_node, node);
+
+		parent = *new;
+		if (strcmp(data->s,this->s)<0)
+			new = &((*new)->rb_left);
+		else if (strcmp(data->s,this->s)>0)
+			new = &((*new)->rb_right);
+		else {
+		    libflat_free((void*)data->s);
+		    libflat_free(data);
+		    return 0;
+		}
+	}
+
+	/* Add new node and rebalance tree. */
+	rb_link_node(&data->node, parent, new);
+	rb_insert_color(&data->node, &recipe_fns);
+
+	return 1;
+}
+EXPORT_SYMBOL(recipe_insert);
+
+void recipe_destroy(struct rb_root* root) {
+
+    struct rb_node * p = rb_first(root);
+    while(p) {
+        struct recipe_node* data = (struct recipe_node*)p;
+        rb_erase(p, root);
+        p = rb_next(p);
+        libflat_free((void*)data->s);
+        libflat_free(data);
+    }
+}
+EXPORT_SYMBOL(recipe_destroy);
+
+size_t recipe_count(const struct rb_root* root) {
+
+	struct rb_node * p = rb_first(root);
+	size_t count = 0;
+	while(p) {
+		count++;
+		p = rb_next(p);
+	}
+	return count;
+}
+EXPORT_SYMBOL(recipe_count);
+
 INTERVAL_TREE_DEFINE(struct flat_node, rb,
 		     uintptr_t, __subtree_last,
 		     START, LAST,static,interval_tree)
@@ -57,6 +139,7 @@ struct blstream* binary_stream_append(struct kflat* kflat, const void* data, siz
     }
     return v;
 }
+EXPORT_SYMBOL(binary_stream_append);
 
 
 struct blstream* binary_stream_append_reserve(struct kflat* kflat, size_t size) {
@@ -100,6 +183,7 @@ struct blstream* binary_stream_insert_front(struct kflat* kflat, const void* dat
 	where->prev = v;
 	return v;
 }
+EXPORT_SYMBOL(binary_stream_insert_front);
 
 struct blstream* binary_stream_insert_front_reserve(struct kflat* kflat, size_t size, struct blstream* where) {
 	struct blstream* v = libflat_zalloc(sizeof(struct blstream),1);
@@ -133,6 +217,7 @@ struct blstream* binary_stream_insert_back(struct kflat* kflat, const void* data
 	where->next = v;
 	return v;
 }
+EXPORT_SYMBOL(binary_stream_insert_back);
 
 struct blstream* binary_stream_insert_back_reserve(struct kflat* kflat, size_t size, struct blstream* where) {
 	struct blstream* v = libflat_zalloc(sizeof(struct blstream),1);
@@ -323,6 +408,7 @@ int bqueue_push_back(struct bqueue* q, const void* m, size_t s) {
     q->size+=copied;
     return 0;
 }
+EXPORT_SYMBOL(bqueue_push_back);
 
 int bqueue_pop_front(struct bqueue* q, void* m, size_t s) {
 
@@ -385,6 +471,7 @@ struct fixup_set_node *fixup_set_search(struct kflat* kflat, uintptr_t v) {
 	DBGS("fixup_set_search(%lx): 0\n",v);
 	return 0;
 }
+EXPORT_SYMBOL(fixup_set_search);
 
 int fixup_set_reserve_address(struct kflat* kflat, uintptr_t addr) {
 
@@ -427,6 +514,7 @@ int fixup_set_reserve_address(struct kflat* kflat, uintptr_t addr) {
 
 	return 0;
 }
+EXPORT_SYMBOL(fixup_set_reserve_address);
 
 int fixup_set_reserve(struct kflat* kflat, struct flat_node* node, size_t offset) {
 
@@ -568,6 +656,7 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 
 	return 0;
 }
+EXPORT_SYMBOL(fixup_set_insert);
 
 void fixup_set_print(struct kflat* kflat) {
 	struct rb_node * p = rb_first(&kflat->FLCTRL.fixup_set_root.rb_root);
@@ -870,6 +959,7 @@ struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr
 		return r;
 	}
 }
+EXPORT_SYMBOL(flatten_plain_type);
 
 void flatten_init(struct kflat* kflat) {
 	memset(&kflat->FLCTRL,0,sizeof(struct FLCONTROL));
