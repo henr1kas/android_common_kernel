@@ -739,6 +739,8 @@ static int kflat_stringset_test_iter(struct kflat *kflat, size_t num_strings, in
 		);
 	);
 
+        stringset_destroy(&stringset_root);
+
 	flat_infos("@Flatten done: %d\n",kflat->errno);
 	if (!kflat->errno) {
 		err = flatten_write(kflat);
@@ -775,6 +777,8 @@ static int kflat_stringset_module_test(struct kflat *kflat, size_t num_strings, 
 			FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER(rb_root,&stringset_root);
 		);
 	);
+
+        stringset_destroy(&stringset_root);
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
 	if (!kflat->errno) {
@@ -832,7 +836,7 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 	}
 
 	if ((arg&(~0x3))==STRINGSETM) {
-			err = kflat_stringset_module_test(kflat,50000,arg&0x01);
+			err = kflat_stringset_module_test(kflat,200000,arg&0x01);
 			if (err) return err;
 		}
 
