@@ -13,6 +13,9 @@
 
 #define DEFAULT_ITER_QUEUE_SIZE (1024*1024*8)
 
+#define XSTR(s) STR(s)
+#define STR(s) #s
+
 static inline void *libflat_zalloc(size_t size, size_t n) {
 	return kvzalloc(size*n,GFP_KERNEL);
 }
@@ -128,6 +131,7 @@ typedef struct flatten_pointer* (*flatten_struct_f)(struct kflat* kflat, const v
 
 struct recipe_node* recipe_search(const char* s);
 int recipe_insert(const char* s, flatten_struct_f f);
+int recipe_delete(const char* s);
 void recipe_destroy(struct rb_root* root);
 size_t recipe_count(const struct rb_root* root);
 
@@ -938,9 +942,6 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 			}	\
         }   \
     } while(0)
-
-#define XSTR(s) STR(s)
-#define STR(s) #s
 
 #define FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER(T,p)	\
 	do {    \
@@ -1885,6 +1886,16 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 #define AGGREGATE_FLATTEN_FUNCTION_POINTER(f)	\
 	do {	\
 	} while (0)
+
+#define REGISTER_FLATTEN_STRUCT_ITER(T) \
+	do {	\
+		recipe_insert(STR(S_##T),(flatten_struct_f)flatten_struct_##T##_iter);	\
+	} while(0)
+
+#define UNREGISTER_FLATTEN_STRUCT_ITER(T) \
+	do {	\
+		recipe_delete(STR(S_##T));	\
+	} while(0)
 
 #define FOR_POINTER(PTRTYPE,v,p,...)	\
 	do {	\

@@ -80,6 +80,16 @@ int recipe_insert(const char* s, flatten_struct_f f) {
 }
 EXPORT_SYMBOL(recipe_insert);
 
+int recipe_delete(const char* s) {
+
+	struct recipe_node* node = recipe_search(s);
+	if (node) {
+		rb_erase(&node->node, &recipe_fns);
+	}
+	return 0;
+}
+EXPORT_SYMBOL(recipe_delete);
+
 void recipe_destroy(struct rb_root* root) {
 
     struct rb_node * p = rb_first(root);

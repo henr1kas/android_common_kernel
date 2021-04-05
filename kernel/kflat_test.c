@@ -739,7 +739,7 @@ static int kflat_stringset_test_iter(struct kflat *kflat, size_t num_strings, in
 		);
 	);
 
-        stringset_destroy(&stringset_root);
+	stringset_destroy(&stringset_root);
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
 	if (!kflat->errno) {
@@ -778,7 +778,7 @@ static int kflat_stringset_module_test(struct kflat *kflat, size_t num_strings, 
 		);
 	);
 
-        stringset_destroy(&stringset_root);
+	stringset_destroy(&stringset_root);
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
 	if (!kflat->errno) {
