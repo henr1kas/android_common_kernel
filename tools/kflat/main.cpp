@@ -6,7 +6,6 @@
 #include <sys/time.h>
 #include <set>
 #include <map>
-#include <string>
 
 #if 0
 #include "aot.h"
@@ -44,6 +43,8 @@
 #define container_of(ptr, type, member) (type *)( (char *)(ptr) - offsetof(type,member) )
 #endif
 #endif
+
+typedef uintptr_t (*get_function_address_t)(const char* fsym);
 
 struct _ALIGNAS(RB_NODE_ALIGN) rb_node {
 	uintptr_t  __rb_parent_color;
@@ -253,12 +254,10 @@ void fix_unflatten_memory(struct flatten_header* hdr, void* memory) {
 
 std::map<uintptr_t,std::string> fptrmap;
 
-uintptr_t get_function_address(const char* fsym);
-
 void unflatten_init() {
 }
 
-int unflatten_read(FILE* f) {
+int unflatten_read(FILE* f, get_function_address_t gfa) {
 
 	TIME_MARK_START(unfl_b);
 	size_t readin = 0;
@@ -280,7 +279,7 @@ int unflatten_read(FILE* f) {
 	assert(FLCTRL.mem);
 	rd = fread(FLCTRL.mem,1,memsz,f);
 	if (rd!=memsz) return -1; else readin+=rd;
-	if (FLCTRL.HDR.fptr_count>0) {
+	if ((FLCTRL.HDR.fptr_count>0)&&(gfa)) {
 		unsigned char* fptrmapmem = (unsigned char*)malloc(FLCTRL.HDR.fptrmapsz);
 		assert(fptrmapmem);
 		rd = fread(fptrmapmem,1,FLCTRL.HDR.fptrmapsz,f);
@@ -304,13 +303,13 @@ int unflatten_read(FILE* f) {
 	}
 	TIME_MARK_START(fix_b);
 	fix_unflatten_memory(&FLCTRL.HDR,FLCTRL.mem);
-	if (FLCTRL.HDR.fptr_count>0) {
+	if ((FLCTRL.HDR.fptr_count>0)&&(gfa)) {
 		unsigned char* mem = (unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t);
 		for (size_t fi=0; fi<FLCTRL.HDR.fptr_count; ++fi) {
 			size_t fptri = ((uintptr_t*)((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)))[fi];
 			uintptr_t fptrv = *((uintptr_t*)(mem+fptri));
 			if (fptrmap.find(fptrv)!=fptrmap.end()) {
-				uintptr_t nfptr = get_function_address(fptrmap[fptrv].c_str());
+				uintptr_t nfptr = (*gfa)(fptrmap[fptrv].c_str());
 				// Fix function pointer
 				*((void**)(mem+fptri)) = (void*)nfptr;
 			}
@@ -457,7 +456,7 @@ bool endswith (std::string const &s, std::string const &what) {
     }
 }
 
-uintptr_t get_function_address(const char* fsym) {
+uintptr_t get_fpointer_test_function_address(const char* fsym) {
 	std::string sf(fsym);
 	if (endswith(sf,"::kflat_stringset_module_test")) {
 		return (uintptr_t)&kflat_stringset_module_test;
@@ -482,7 +481,7 @@ int main(int argc, char* argv[]) {
 	printf("Size of flatten image: %zu\n",size);
 
 	unflatten_init();
-	assert(unflatten_read(in) == 0);
+	assert(unflatten_read(in,get_fpointer_test_function_address) == 0);
 
 	if (argc>=3) {
 		if (!strcmp(argv[2],"SIMPLE")) {
