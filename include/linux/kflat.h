@@ -2062,6 +2062,11 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 		recipe_insert(STR(ST_I_##T),(flatten_struct_f)flatten_struct_type_##T##_iter);	\
 	} while(0)
 
+#define UNREGISTER_FLATTEN_STRUCT_ITER(T) \
+	do {	\
+		recipe_delete(STR(S_I_##T));	\
+	} while(0)
+
 #define UNREGISTER_FLATTEN_STRUCT_TYPE_ITER(T) \
 	do {	\
 		recipe_delete(STR(ST_I_##T));	\
