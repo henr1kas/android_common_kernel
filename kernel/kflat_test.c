@@ -808,10 +808,6 @@ static int kflat_fpointer_test(struct kflat *kflat, int debug_flag) {
 			binary_stream_calculate_index};
 	int err = 0;
 
-	flat_infos("static_f [kflat_stringset_module_test]: %lx:%s\n",(unsigned long)F.sf,get_function_name_string((unsigned long)F.sf));
-	flat_infos("exported_f [binary_stream_append]: %lx:%s\n",(unsigned long)F.ef,get_function_name_string((unsigned long)F.ef));
-	flat_infos("global_f [binary_stream_calculate_index]: %lx:%s\n",(unsigned long)F.gf,get_function_name_string((unsigned long)F.gf));
-
 	flatten_init(kflat);
 	flatten_set_debug_flag(kflat,debug_flag);
 
