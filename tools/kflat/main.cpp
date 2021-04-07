@@ -5,6 +5,7 @@
 #include <math.h>
 #include <sys/time.h>
 #include <set>
+#include <map>
 
 #if 0
 #include "aot.h"
@@ -99,7 +100,10 @@ struct task_struct {
 struct flatten_header {
 	size_t memory_size;
 	size_t ptr_count;
+	size_t fptr_count;
 	size_t root_addr_count;
+	uintptr_t this_addr;
+	size_t fptrmapsz;
 	uint64_t magic;
 };
 
@@ -171,7 +175,7 @@ struct FLCONTROL FLCTRL = {
 
 #define ROOT_POINTER_NEXT(PTRTYPE)	((PTRTYPE)(root_pointer_next()))
 #define ROOT_POINTER_SEQ(PTRTYPE,n)	((PTRTYPE)(root_pointer_seq(n)))
-#define FLATTEN_MEMORY_START	((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t))
+#define FLATTEN_MEMORY_START	((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t))
 
 void* root_pointer_next() {
 	
@@ -237,7 +241,7 @@ void root_addr_append(uintptr_t root_addr) {
 
 void fix_unflatten_memory(struct flatten_header* hdr, void* memory) {
 	size_t i;
-	void* mem = (unsigned char*)memory+hdr->ptr_count*sizeof(size_t);
+	void* mem = (unsigned char*)memory+hdr->ptr_count*sizeof(size_t)+hdr->fptr_count*sizeof(size_t);
 	for (i=0; i<hdr->ptr_count; ++i) {
 		size_t fix_loc = *((size_t*)memory+i);
 		uintptr_t ptr = (uintptr_t)( *((void**)((unsigned char*)mem+fix_loc)) );
@@ -245,6 +249,10 @@ void fix_unflatten_memory(struct flatten_header* hdr, void* memory) {
 		*((void**)((unsigned char*)mem+fix_loc)) = (unsigned char*)mem + ptr;
 	}
 }
+
+std::map<uintptr_t,std::string> fptrmap;
+
+uintptr_t get_function_address(const char* fsym);
 
 void unflatten_init() {
 }
@@ -266,17 +274,49 @@ int unflatten_read(FILE* f) {
 		if (rd!=1) return -1; else readin+=sizeof(size_t);
 		root_addr_append(root_addr_offset);
 	}
-	size_t memsz = FLCTRL.HDR.memory_size+FLCTRL.HDR.ptr_count*sizeof(size_t);
+	size_t memsz = FLCTRL.HDR.memory_size+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t);
 	FLCTRL.mem = malloc(memsz);
 	assert(FLCTRL.mem);
 	rd = fread(FLCTRL.mem,1,memsz,f);
 	if (rd!=memsz) return -1; else readin+=rd;
+	if (FLCTRL.HDR.fptr_count>0) {
+		unsigned char* fptrmapmem = (unsigned char*)malloc(FLCTRL.HDR.fptrmapsz);
+		assert(fptrmapmem);
+		rd = fread(fptrmapmem,1,FLCTRL.HDR.fptrmapsz,f);
+		if (rd!=FLCTRL.HDR.fptrmapsz) return -1; else readin+=rd;
+		size_t fptrnum = *((size_t*)fptrmapmem);
+		fptrmapmem+=sizeof(size_t);
+		for (size_t kvi=0; kvi<fptrnum; ++kvi) {
+			uintptr_t addr = *((uintptr_t*)fptrmapmem);
+			fptrmapmem+=sizeof(uintptr_t);
+			size_t sz = *((size_t*)fptrmapmem);
+			fptrmapmem+=sizeof(size_t);
+			std::string sym((const char*)fptrmapmem,sz);
+			fptrmapmem+=sz;
+			fptrmap.insert(std::pair<uintptr_t,std::string>(addr,sym));
+		}
+		free(fptrmapmem-FLCTRL.HDR.fptrmapsz);
+	}
 	if ((FLCTRL.option&option_silent)==0) {
 		printf("# Unflattening done. Summary:\n");
 		TIME_CHECK_FMT(unfl_b,read_e,"  Image read time: %fs\n");
 	}
 	TIME_MARK_START(fix_b);
 	fix_unflatten_memory(&FLCTRL.HDR,FLCTRL.mem);
+	if (FLCTRL.HDR.fptr_count>0) {
+		unsigned char* mem = (unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t);
+		for (size_t fi=0; fi<FLCTRL.HDR.fptr_count; ++fi) {
+			size_t fptri = ((uintptr_t*)((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)))[fi];
+			uintptr_t fptrv = *((uintptr_t*)(mem+fptri));
+			if (fptrmap.find(fptrv)!=fptrmap.end()) {
+				uintptr_t nfptr = get_function_address(fptrmap[fptrv].c_str());
+				// Fix function pointer
+				*((void**)(mem+fptri)) = (void*)nfptr;
+			}
+			else {
+			}
+		}
+	}
 	if ((FLCTRL.option&option_silent)==0) {
 		TIME_CHECK_FMT(fix_b,fix_e,"  Fixing memory time: %fs\n");
 		TIME_CHECK_FMT(unfl_b,fix_e,"  Total time: %fs\n");
@@ -293,6 +333,7 @@ void unflatten_fini() {
     	free(p);
     }
     free(FLCTRL.mem);
+    fptrmap.clear();
 }
 
 struct point {
@@ -383,6 +424,53 @@ void walk_print_task_struct(struct task_struct* T,std::set<struct task_struct*>&
 	}
 }
 
+struct fptr_test_struct {
+	int i;
+	long l;
+	char* s;
+	int (*sf)(struct kflat *kflat, size_t num_strings, int debug_flag);
+	struct blstream* (*ef)(struct kflat* kflat, const void* data, size_t size);
+	int (*gf)(struct kflat* kflat);
+};
+
+int kflat_stringset_module_test(struct kflat *kflat, size_t num_strings, int debug_flag) {
+	printf("HOST::kflat_stringset_module_test()\n");
+	return 0;
+}
+
+int binary_stream_append(struct kflat* kflat, const void* data, size_t size) {
+	printf("HOST::binary_stream_append()\n");
+	return 0;
+}
+
+int binary_stream_calculate_index(struct kflat* kflat) {
+	printf("HOST::binary_stream_calculate_index()\n");
+	return 0;
+}
+
+bool endswith (std::string const &s, std::string const &what) {
+    if (s.length() >= what.length()) {
+        return (0 == s.compare (s.length() - what.length(), what.length(), what));
+    } else {
+        return false;
+    }
+}
+
+uintptr_t get_function_address(const char* fsym) {
+	std::string sf(fsym);
+	if (endswith(sf,"::kflat_stringset_module_test")) {
+		return (uintptr_t)&kflat_stringset_module_test;
+	}
+	else if (endswith(sf,"::binary_stream_append")) {
+		return (uintptr_t)&binary_stream_append;
+	}
+	else if (endswith(sf,"::binary_stream_calculate_index")) {
+		return (uintptr_t)&binary_stream_calculate_index;
+	}
+
+	return 0;
+}
+
 int main(int argc, char* argv[]) {
 
 	FILE* in = fopen(argv[1], "r");
@@ -471,6 +559,15 @@ int main(int argc, char* argv[]) {
 		else if (!strcmp(argv[2],"POINTER")) {
 			double*** ehhh = ROOT_POINTER_SEQ(double***, 0);
 			printf("The magic answer to the ultimate question of life?: %f\n", ***ehhh);
+		}
+		else if (!strcmp(argv[2],"FPOINTER")) {
+			const struct fptr_test_struct* p = ROOT_POINTER_NEXT(const struct fptr_test_struct*);
+			printf("%d\n",p->i);
+			printf("%ld\n",p->l);
+			printf("%s\n",p->s);
+			p->sf(0,0,0);
+			p->ef(0,0,0);
+			p->gf(0);
 		}
 	}
 

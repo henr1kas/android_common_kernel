@@ -789,6 +789,46 @@ static int kflat_stringset_module_test(struct kflat *kflat, size_t num_strings, 
 	return err;
 }
 
+struct fptr_test_struct {
+	int i;
+	long l;
+	char* s;
+	int (*sf)(struct kflat *kflat, size_t num_strings, int debug_flag);
+	struct blstream* (*ef)(struct kflat* kflat, const void* data, size_t size);
+	int (*gf)(struct kflat* kflat);
+};
+
+int binary_stream_calculate_index(struct kflat* kflat);
+
+static int kflat_fpointer_test(struct kflat *kflat, int debug_flag) {
+
+	struct fptr_test_struct F = {0,1000,"this_string",
+			kflat_stringset_module_test,
+			binary_stream_append,
+			binary_stream_calculate_index};
+	int err = 0;
+
+	flat_infos("static_f [kflat_stringset_module_test]: %lx:%s\n",(unsigned long)F.sf,get_function_name_string((unsigned long)F.sf));
+	flat_infos("exported_f [binary_stream_append]: %lx:%s\n",(unsigned long)F.ef,get_function_name_string((unsigned long)F.ef));
+	flat_infos("global_f [binary_stream_calculate_index]: %lx:%s\n",(unsigned long)F.gf,get_function_name_string((unsigned long)F.gf));
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	FOR_ROOT_POINTER(&F,
+		FLATTEN_STRUCT_DYNAMIC_RECIPE(fptr_test_struct,&F);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
 enum KFLAT_TEST_CASE {
 	DEBUG_FLAG=1,
 	TEST_ITER=2,
@@ -800,6 +840,7 @@ enum KFLAT_TEST_CASE {
 	OVERLAPLIST=6<<2,
 	OVERLAPPTR=7<<2,
 	STRINGSETM=8<<2,
+	FPOINTER=9<<2,
 };
 
 #include "kflat_test_data.h"
@@ -876,6 +917,11 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 			err = kflat_overlapptr_test_iter(kflat,arg&0x01);
 			if (err) return err;
 		}
+	}
+
+	if ((arg&(~0x3))==FPOINTER) {
+		err = kflat_fpointer_test(kflat,arg&0x01);
+		if (err) return err;
 	}
 
 	return 0;
