@@ -142,6 +142,7 @@ struct recipe_node {
 
 struct recipe_node* recipe_search(const char* s);
 int recipe_insert(const char* s, flatten_struct_f f);
+int recipe_iter_insert(const char* s, flatten_struct_iter_f iterf);
 int recipe_delete(const char* s);
 void recipe_destroy(struct rb_root* root);
 size_t recipe_count(const struct rb_root* root);
@@ -1035,7 +1036,7 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 		DBGTP(FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER,T,p);  \
 		rnode = recipe_search(STR(S_I_##T));	\
 		if (!rnode) {	\
-			DBGS("FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER: recipe string not found (%s)\n",STR(S_##T));	\
+			DBGS("FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER: recipe string not found (%s)\n",STR(S_I_##T));	\
 			KFLAT_ACCESSOR->errno = ENOENT;	\
 		}	\
 		else {	\
@@ -1115,7 +1116,7 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 		DBGTP(FLATTEN_STRUCT_TYPE_DYNAMIC_RECIPE_ITER,T,p);  \
 		rnode = recipe_search(STR(ST_I_##T));	\
 		if (!rnode) {	\
-			DBGS("FLATTEN_STRUCT_TYPE_DYNAMIC_RECIPE_ITER: recipe string not found (%s)\n",STR(ST_##T));	\
+			DBGS("FLATTEN_STRUCT_TYPE_DYNAMIC_RECIPE_ITER: recipe string not found (%s)\n",STR(ST_I_##T));	\
 			KFLAT_ACCESSOR->errno = ENOENT;	\
 		}	\
 		else {	\
@@ -2037,14 +2038,14 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 		recipe_insert(STR(S_##T),(flatten_struct_f)flatten_struct_##T);	\
 	} while(0)
 
-#define REGISTER_FLATTEN_STRUCT_TYPE(T) \
-	do {	\
-		recipe_insert(STR(ST_##T),(flatten_struct_f)flatten_struct_type_##T);	\
-	} while(0)
-
 #define UNREGISTER_FLATTEN_STRUCT(T) \
 	do {	\
 		recipe_delete(STR(S_##T));	\
+	} while(0)
+
+#define REGISTER_FLATTEN_STRUCT_TYPE(T) \
+	do {	\
+		recipe_insert(STR(ST_##T),(flatten_struct_f)flatten_struct_type_##T);	\
 	} while(0)
 
 #define UNREGISTER_FLATTEN_STRUCT_TYPE(T) \
@@ -2054,17 +2055,17 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 
 #define REGISTER_FLATTEN_STRUCT_ITER(T) \
 	do {	\
-		recipe_insert(STR(S_I_##T),(flatten_struct_f)flatten_struct_##T##_iter);	\
-	} while(0)
-
-#define REGISTER_FLATTEN_STRUCT_TYPE_ITER(T) \
-	do {	\
-		recipe_insert(STR(ST_I_##T),(flatten_struct_f)flatten_struct_type_##T##_iter);	\
+		recipe_iter_insert(STR(S_I_##T),(flatten_struct_iter_f)flatten_struct_##T##_iter);	\
 	} while(0)
 
 #define UNREGISTER_FLATTEN_STRUCT_ITER(T) \
 	do {	\
 		recipe_delete(STR(S_I_##T));	\
+	} while(0)
+
+#define REGISTER_FLATTEN_STRUCT_TYPE_ITER(T) \
+	do {	\
+		recipe_iter_insert(STR(ST_I_##T),(flatten_struct_iter_f)flatten_struct_type_##T##_iter);	\
 	} while(0)
 
 #define UNREGISTER_FLATTEN_STRUCT_TYPE_ITER(T) \

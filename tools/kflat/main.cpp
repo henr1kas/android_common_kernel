@@ -6,6 +6,7 @@
 #include <sys/time.h>
 #include <set>
 #include <map>
+#include <string>
 
 #if 0
 #include "aot.h"
