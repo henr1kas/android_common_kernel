@@ -15,12 +15,13 @@ kernel_load_addr = this_addr - vmlinux_fdi_addr
 print("Kernel load address: %lx"%(kernel_load_addr))
 print("Found %d function pointers"%(fptr_count))
 fptrMap = {}
+matched = 0
 with open(imgpath, "rb") as f:
 	f.seek(64+root_addr_count*8+ptr_count*8)
 	u = list(struct.unpack('%dQ'%(fptr_count), f.read(fptr_count*8)))
 	f.seek(64+root_addr_count*8+ptr_count*8+fptr_count*8)
 	img = f.read(memory_size)
-	vmlinux_fptrs = [struct.unpack('Q',img[i:i+8])[0]-kernel_load_addr for i in u]
+	vmlinux_fptrs = [struct.unpack('Q',img[i:i+8])[0]-kernel_load_addr for i in u if struct.unpack('Q',img[i:i+8])[0]>0]
 	import re
 	smre = re.compile("(\w+)\sin\ssection\s.text$")
 	for vp in vmlinux_fptrs:
@@ -36,7 +37,9 @@ with open(imgpath, "rb") as f:
 					addr = int(sdi.split()[-2][2:],16)
 					if (addr==vp):
 						print("Successfully matched function pointer 0x%lx to function %s::%s"%(vp,kfn,fsym))
-						fptrMap[addr+kernel_load_addr] = "%s::%s"%(kfn,fsym)
+						matched+=1
+						if addr+kernel_load_addr not in fptrMap:
+							fptrMap[addr+kernel_load_addr] = "%s::%s"%(kfn,fsym)
 						break
 				else:
 					print("Couldn't match symbol at vmlinux address 0x%lx: %s\n",vp,str(fsL))
@@ -47,8 +50,8 @@ with open(imgpath, "rb") as f:
 			print(e)
 			print("Skipping...")
 print("# Summary:")
-print("Matched %d/%d function pointers"%(len(fptrMap),fptr_count))
-if len(fptrMap)!=fptr_count:
+print("Matched %d/%d function pointers"%(matched,fptr_count))
+if matched!=fptr_count:
 	print("WARNING: some function pointers were not matched and will not be replaced")
 fptrmapsz = 8+len(fptrMap)*8*2+sum([len(x) for x in fptrMap.values()])
 with open(imgpath, "r+b") as f:
