@@ -6,7 +6,6 @@
 #include <sys/time.h>
 #include <set>
 #include <map>
-#include <string>
 
 #if 0
 #include "aot.h"
@@ -472,6 +471,11 @@ uintptr_t get_fpointer_test_function_address(const char* fsym) {
 	return 0;
 }
 
+uintptr_t print_function_address(const char* fsym) {
+	printf("HOST: %s\n",fsym);
+	return 0;
+}
+
 int main(int argc, char* argv[]) {
 
 	FILE* in = fopen(argv[1], "r");
@@ -482,7 +486,12 @@ int main(int argc, char* argv[]) {
 	printf("Size of flatten image: %zu\n",size);
 
 	unflatten_init();
-	assert(unflatten_read(in,get_fpointer_test_function_address) == 0);
+	if (!strcmp(argv[2],"CURRENTTASKM")) {
+		assert(unflatten_read(in,print_function_address) == 0);
+	}
+	else {
+		assert(unflatten_read(in,get_fpointer_test_function_address) == 0);
+	}
 
 	if (argc>=3) {
 		if (!strcmp(argv[2],"SIMPLE")) {
@@ -527,6 +536,14 @@ int main(int argc, char* argv[]) {
 			printf("Half of the circumference: %.17f\n", circumference / 2);
 		}
 		else if (!strcmp(argv[2],"CURRENTTASK")) {
+			struct task_struct *T = ROOT_POINTER_NEXT(struct task_struct*);
+			print_struct_task_offsets(T);
+			printf("\n");
+			printf("# root PID: %d\n",T->pid);
+			std::set<struct task_struct*> visited;
+			walk_print_task_struct(T,visited);
+		}
+		else if (!strcmp(argv[2],"CURRENTTASKM")) {
 			struct task_struct *T = ROOT_POINTER_NEXT(struct task_struct*);
 			print_struct_task_offsets(T);
 			printf("\n");

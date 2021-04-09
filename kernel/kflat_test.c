@@ -622,6 +622,33 @@ static int kflat_currenttask_test_iter(struct kflat *kflat, int debug_flag) {
 
 }
 
+static int kflat_currenttask_module_test(struct kflat *kflat, int debug_flag) {
+
+	int err = 0;
+	struct task_struct* t;
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	t = current;
+	print_struct_task_offsets(t);
+
+	FOR_ROOT_POINTER(t,
+		UNDER_ITER_HARNESS(
+			FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER(task_struct, t);
+		);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
 static inline const struct string_node* ptr_remove_color(const struct string_node* ptr) {
 	return (const struct string_node*)( (uintptr_t)ptr & ~3 );
 }
@@ -837,6 +864,7 @@ enum KFLAT_TEST_CASE {
 	OVERLAPPTR=7<<2,
 	STRINGSETM=8<<2,
 	FPOINTER=9<<2,
+	CURRENTTASKM=10<<2,
 };
 
 #include "kflat_test_data.h"
@@ -891,6 +919,11 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 			err = kflat_currenttask_test_iter(kflat,arg&0x01);
 			if (err) return err;
 		}
+	}
+
+	if ((arg&(~0x3))==CURRENTTASKM) {
+		err = kflat_currenttask_module_test(kflat,arg&0x01);
+		if (err) return err;
 	}
 
 	if ((arg&(~0x3))==OVERLAPLIST) {
