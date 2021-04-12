@@ -393,7 +393,7 @@ int unflatten_create(FILE* f, get_function_address_t gfa) {
 			if (fptrmap.find(fptrv)!=fptrmap.end()) {
 				uintptr_t nfptr = (*gfa)(fptrmap[fptrv].c_str());
 				// Fix function pointer
-				*((void**)(mem+fptri)) = (void*)nfptr;
+				*((void**)((unsigned char*)node->mptr+node_offset)) = (void*)nfptr;
 			}
 			else {
 			}
