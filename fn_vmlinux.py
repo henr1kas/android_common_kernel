@@ -1,8 +1,8 @@
 print("Detecting kernel flatten image function pointers (gdb {})".format(gdb.VERSION))
 import struct
 with open(imgpath,"rb") as f:
-	hdr = f.read(64)
-memory_size, ptr_count, fptr_count, root_addr_count, this_addr, fnsize, magic = struct.unpack('QQQQQQQ', hdr[8:64])
+	hdr = f.read(72)
+memory_size, ptr_count, fptr_count, root_addr_count, this_addr, fnsize, mcount, magic = struct.unpack('QQQQQQQQ', hdr[8:72])
 assert magic==5065495511331851776, "Invalid magic in flattened image"
 print("Flatten magic: OK")
 try:
@@ -17,9 +17,9 @@ print("Found %d function pointers"%(fptr_count))
 fptrMap = {}
 matched = 0
 with open(imgpath, "rb") as f:
-	f.seek(64+root_addr_count*8+ptr_count*8)
+	f.seek(72+root_addr_count*8+ptr_count*8)
 	u = list(struct.unpack('%dQ'%(fptr_count), f.read(fptr_count*8)))
-	f.seek(64+root_addr_count*8+ptr_count*8+fptr_count*8)
+	f.seek(72+root_addr_count*8+ptr_count*8+fptr_count*8+mcount*2*8)
 	img = f.read(memory_size)
 	vmlinux_fptrs = [struct.unpack('Q',img[i:i+8])[0]-kernel_load_addr for i in u if struct.unpack('Q',img[i:i+8])[0]>0]
 	import re
@@ -56,7 +56,7 @@ if matched!=fptr_count:
 fptrmapsz = 8+len(fptrMap)*8*2+sum([len(x) for x in fptrMap.values()])
 with open(imgpath, "r+b") as f:
 	#f.seek(0,2)
-	f.seek(64+root_addr_count*8+ptr_count*8+fptr_count*8+memory_size)
+	f.seek(72+root_addr_count*8+ptr_count*8+fptr_count*8+mcount*2*8+memory_size)
 	f.write(struct.pack("Q",len(fptrMap))) # Number of elements
 	for k,v in fptrMap.items():
 		f.write(struct.pack("Q",k)) # function pointer address
