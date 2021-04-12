@@ -323,7 +323,7 @@ int unflatten_create(FILE* f, get_function_address_t gfa) {
 	assert(FLCTRL.mem);
 	rd = fread(FLCTRL.mem,1,memsz,f);
 	if (rd!=memsz) return -1; else readin+=rd;
-	if ((FLCTRL.HDR.fptr_count>0)&&(gfa)) {
+	if ((FLCTRL.HDR.fptr_count>0)&&(FLCTRL.HDR.fptrmapsz>0)&&(gfa)) {
 		unsigned char* fptrmapmem = (unsigned char*)malloc(FLCTRL.HDR.fptrmapsz);
 		assert(fptrmapmem);
 		rd = fread(fptrmapmem,1,FLCTRL.HDR.fptrmapsz,f);
@@ -431,7 +431,7 @@ int unflatten_read(FILE* f, get_function_address_t gfa) {
 	assert(FLCTRL.mem);
 	rd = fread(FLCTRL.mem,1,memsz,f);
 	if (rd!=memsz) return -1; else readin+=rd;
-	if ((FLCTRL.HDR.fptr_count>0)&&(gfa)) {
+	if ((FLCTRL.HDR.fptr_count>0)&&(FLCTRL.HDR.fptrmapsz>0)&&(gfa)) {
 		unsigned char* fptrmapmem = (unsigned char*)malloc(FLCTRL.HDR.fptrmapsz);
 		assert(fptrmapmem);
 		rd = fread(fptrmapmem,1,FLCTRL.HDR.fptrmapsz,f);
