@@ -44,6 +44,7 @@ struct flatten_header {
 	size_t root_addr_count;
 	uintptr_t this_addr;
 	size_t fptrmapsz;
+	size_t mcount;
 	uint64_t magic;
 };
 

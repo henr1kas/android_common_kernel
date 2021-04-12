@@ -9,4 +9,4 @@ rbtree.o: rbtree.c rbtree.h
 flatcheck: main.o rbtree.o
 	clang++ -o flatcheck main.o rbtree.o -lm
 clean:
-	rm -f flatcheck
+	rm -f flatcheck main.o rbtree.o

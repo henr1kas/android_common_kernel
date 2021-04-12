@@ -7,6 +7,7 @@
 #include <set>
 #include <map>
 #include <string>
+#include <limits.h>
 
 #if 0
 #include "aot.h"
@@ -58,10 +59,38 @@ struct rb_root {
 	struct rb_node *rb_node;
 };
 
+#include "interval_tree.h"
+#include "interval_tree_generic.h"
+
+struct interval_tree_node {
+	struct rb_node rb;
+	uintptr_t start;	/* Start of interval */
+	uintptr_t last;	/* Last location _in_ interval */
+	uintptr_t __subtree_last;
+	void* mptr;
+};
+
+#define START(node) ((node)->start)
+#define LAST(node)  ((node)->last)
+
+extern "C" {
+	void __rb_erase_color(struct rb_node *parent, struct rb_root *root,
+		void (*augment_rotate)(struct rb_node *old, struct rb_node *__new));
+	void __rb_insert_augmented(struct rb_node *node, struct rb_root *root,
+		void (*augment_rotate)(struct rb_node *old, struct rb_node *__new));
+}
+
+INTERVAL_TREE_DEFINE(struct interval_tree_node, rb,
+		     uintptr_t, __subtree_last,
+		     START, LAST,, interval_tree)
+
 void* malloc (size_t size);
 void* calloc (size_t num, size_t size);
 void free(void *ptr);
 
+struct interval_tree_node * interval_tree_iter_first(struct rb_root *root, uintptr_t start, uintptr_t last);
+struct interval_tree_node *	interval_tree_iter_next(struct interval_tree_node *node, uintptr_t start, uintptr_t last);
+struct rb_node* interval_tree_insert(struct interval_tree_node *node, struct rb_root *root);
 
 struct task_struct {
 	unsigned char padding0[60];
@@ -107,6 +136,7 @@ struct flatten_header {
 	size_t root_addr_count;
 	uintptr_t this_addr;
 	size_t fptrmapsz;
+	size_t mcount;
 	uint64_t magic;
 };
 
@@ -178,7 +208,7 @@ struct FLCONTROL FLCTRL = {
 
 #define ROOT_POINTER_NEXT(PTRTYPE)	((PTRTYPE)(root_pointer_next()))
 #define ROOT_POINTER_SEQ(PTRTYPE,n)	((PTRTYPE)(root_pointer_seq(n)))
-#define FLATTEN_MEMORY_START	((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t))
+#define FLATTEN_MEMORY_START	((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t)+FLCTRL.HDR.mcount*2*sizeof(size_t))
 
 void* root_pointer_next() {
 	
@@ -200,7 +230,15 @@ void* root_pointer_next() {
 		return 0;
 	}
 	else {
-		return (FLATTEN_MEMORY_START+FLCTRL.last_accessed_root->root_addr);
+		if (interval_tree_iter_first(&FLCTRL.imap_root,0,ULONG_MAX)) {	/* We have allocated each memory fragment individually */
+			struct interval_tree_node *node = interval_tree_iter_first(&FLCTRL.imap_root,FLCTRL.last_accessed_root->root_addr,FLCTRL.last_accessed_root->root_addr+8);
+			assert(node);
+			size_t node_offset = FLCTRL.last_accessed_root->root_addr-node->start;
+			return (unsigned char*)node->mptr+node_offset;
+		}
+		else {
+			return (FLATTEN_MEMORY_START+FLCTRL.last_accessed_root->root_addr);
+		}
 	}
 }
 
@@ -224,7 +262,15 @@ void* root_pointer_seq(size_t index) {
 		return 0;
 	}
 	else {
-		return (FLATTEN_MEMORY_START+FLCTRL.last_accessed_root->root_addr);
+		if (interval_tree_iter_first(&FLCTRL.imap_root,0,ULONG_MAX)) {	/* We have allocated each memory fragment individually */
+			struct interval_tree_node *node = interval_tree_iter_first(&FLCTRL.imap_root,FLCTRL.last_accessed_root->root_addr,FLCTRL.last_accessed_root->root_addr+8);
+			assert(node);
+			size_t node_offset = FLCTRL.last_accessed_root->root_addr-node->start;
+			return (unsigned char*)node->mptr+node_offset;
+		}
+		else {
+			return (FLATTEN_MEMORY_START+FLCTRL.last_accessed_root->root_addr);
+		}
 	}
 }
 
@@ -244,7 +290,7 @@ void root_addr_append(uintptr_t root_addr) {
 
 void fix_unflatten_memory(struct flatten_header* hdr, void* memory) {
 	size_t i;
-	void* mem = (unsigned char*)memory+hdr->ptr_count*sizeof(size_t)+hdr->fptr_count*sizeof(size_t);
+	void* mem = (unsigned char*)memory+hdr->ptr_count*sizeof(size_t)+hdr->fptr_count*sizeof(size_t)+hdr->mcount*2*sizeof(size_t);
 	for (i=0; i<hdr->ptr_count; ++i) {
 		size_t fix_loc = *((size_t*)memory+i);
 		uintptr_t ptr = (uintptr_t)( *((void**)((unsigned char*)mem+fix_loc)) );
@@ -256,6 +302,111 @@ void fix_unflatten_memory(struct flatten_header* hdr, void* memory) {
 std::map<uintptr_t,std::string> fptrmap;
 
 void unflatten_init() {
+}
+
+int unflatten_create(FILE* f, get_function_address_t gfa) {
+
+	TIME_MARK_START(unfl_b);
+	size_t readin = 0;
+	size_t rd = fread(&FLCTRL.HDR,sizeof(struct flatten_header),1,f);
+	if (rd!=1) return -1; else readin+=sizeof(struct flatten_header);
+	if (FLCTRL.HDR.magic!=FLATTEN_MAGIC) {
+		fprintf(stderr,"Invalid magic while reading flattened image\n");
+		return -1;
+	}
+	size_t* root_addr_array = (size_t*)malloc(FLCTRL.HDR.root_addr_count*sizeof(size_t));
+	assert(root_addr_array);
+	rd = fread(root_addr_array,sizeof(size_t),FLCTRL.HDR.root_addr_count,f);
+	if (rd!=FLCTRL.HDR.root_addr_count) return -1; else readin+=sizeof(size_t)*FLCTRL.HDR.root_addr_count;
+	size_t memsz = FLCTRL.HDR.memory_size+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t)+FLCTRL.HDR.mcount*2*sizeof(size_t);
+	FLCTRL.mem = malloc(memsz);
+	assert(FLCTRL.mem);
+	rd = fread(FLCTRL.mem,1,memsz,f);
+	if (rd!=memsz) return -1; else readin+=rd;
+	if ((FLCTRL.HDR.fptr_count>0)&&(gfa)) {
+		unsigned char* fptrmapmem = (unsigned char*)malloc(FLCTRL.HDR.fptrmapsz);
+		assert(fptrmapmem);
+		rd = fread(fptrmapmem,1,FLCTRL.HDR.fptrmapsz,f);
+		if (rd!=FLCTRL.HDR.fptrmapsz) return -1; else readin+=rd;
+		size_t fptrnum = *((size_t*)fptrmapmem);
+		fptrmapmem+=sizeof(size_t);
+		for (size_t kvi=0; kvi<fptrnum; ++kvi) {
+			uintptr_t addr = *((uintptr_t*)fptrmapmem);
+			fptrmapmem+=sizeof(uintptr_t);
+			size_t sz = *((size_t*)fptrmapmem);
+			fptrmapmem+=sizeof(size_t);
+			std::string sym((const char*)fptrmapmem,sz);
+			fptrmapmem+=sz;
+			fptrmap.insert(std::pair<uintptr_t,std::string>(addr,sym));
+		}
+		free(fptrmapmem-FLCTRL.HDR.fptrmapsz);
+	}
+	if ((FLCTRL.option&option_silent)==0) {
+		printf("# Unflattening done. Summary:\n");
+		TIME_CHECK_FMT(unfl_b,read_e,"  Image read time: %fs\n");
+	}
+	TIME_MARK_START(create_b);
+	size_t* minfoptr = (size_t*)(((unsigned char*)FLCTRL.mem)+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t));
+	unsigned char* memptr = ((unsigned char*)FLCTRL.mem)+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t)+FLCTRL.HDR.mcount*2*sizeof(size_t);
+	for (size_t i=0; i<FLCTRL.HDR.mcount; ++i) {
+		size_t index = *minfoptr++;
+		size_t size = *minfoptr++;
+		struct interval_tree_node *node = (struct interval_tree_node*)calloc(1,sizeof(struct interval_tree_node));
+		node->start = index;
+		node->last = index+size-1;
+		void* fragment = malloc(size);
+		assert(fragment!=0);
+		memcpy(fragment,memptr+index,size);
+		node->mptr = fragment;
+		struct rb_node* rb = interval_tree_insert(node, &FLCTRL.imap_root);
+	}
+	if ((FLCTRL.option&option_silent)==0) {
+		TIME_CHECK_FMT(create_b,create_e,"  Creating memory time: %fs\n");
+	}
+	TIME_MARK_START(fix_b);
+	for (size_t i=0; i<FLCTRL.HDR.root_addr_count; ++i) {
+		size_t root_addr_offset = root_addr_array[i];
+		root_addr_append(root_addr_offset);
+	}
+	free(root_addr_array);
+	for (size_t i=0; i<FLCTRL.HDR.ptr_count; ++i) {
+		void* mem = (unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t)+FLCTRL.HDR.mcount*2*sizeof(size_t);
+		size_t fix_loc = *((size_t*)FLCTRL.mem+i);
+		struct interval_tree_node *node = interval_tree_iter_first(&FLCTRL.imap_root,fix_loc,fix_loc+8);
+		assert(node);
+		size_t node_offset = fix_loc-node->start;
+		uintptr_t ptr = (uintptr_t)( *((void**)((unsigned char*)mem+fix_loc)) );
+		struct interval_tree_node *ptr_node = interval_tree_iter_first(&FLCTRL.imap_root,ptr,ptr+8);
+		assert(ptr_node);
+		size_t ptr_node_offset = ptr-ptr_node->start;
+		/* Make the fix */
+		*((void**)((unsigned char*)node->mptr+node_offset)) = (unsigned char*)ptr_node->mptr + ptr_node_offset;
+	}
+	if ((FLCTRL.HDR.fptr_count>0)&&(gfa)) {
+		unsigned char* mem = (unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t)+FLCTRL.HDR.mcount*2*sizeof(size_t);
+		for (size_t fi=0; fi<FLCTRL.HDR.fptr_count; ++fi) {
+			size_t fptri = ((uintptr_t*)((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)))[fi];
+			struct interval_tree_node *node = interval_tree_iter_first(&FLCTRL.imap_root,fptri,fptri+8);
+			assert(node);
+			size_t node_offset = fptri-node->start;
+			uintptr_t fptrv = *((uintptr_t*)((unsigned char*)node->mptr+node_offset));
+			if (fptrmap.find(fptrv)!=fptrmap.end()) {
+				uintptr_t nfptr = (*gfa)(fptrmap[fptrv].c_str());
+				// Fix function pointer
+				*((void**)(mem+fptri)) = (void*)nfptr;
+			}
+			else {
+			}
+		}
+	}
+	if ((FLCTRL.option&option_silent)==0) {
+		TIME_CHECK_FMT(fix_b,fix_e,"  Fixing memory time: %fs\n");
+		TIME_CHECK_FMT(unfl_b,fix_e,"  Total time: %fs\n");
+		printf("  Total bytes read: %zu\n",readin);
+		printf("  Number of allocated fragments: %zu\n",FLCTRL.HDR.mcount);
+	}
+
+	return 0;
 }
 
 int unflatten_read(FILE* f, get_function_address_t gfa) {
@@ -275,7 +426,7 @@ int unflatten_read(FILE* f, get_function_address_t gfa) {
 		if (rd!=1) return -1; else readin+=sizeof(size_t);
 		root_addr_append(root_addr_offset);
 	}
-	size_t memsz = FLCTRL.HDR.memory_size+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t);
+	size_t memsz = FLCTRL.HDR.memory_size+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t)+FLCTRL.HDR.mcount*2*sizeof(size_t);
 	FLCTRL.mem = malloc(memsz);
 	assert(FLCTRL.mem);
 	rd = fread(FLCTRL.mem,1,memsz,f);
@@ -305,7 +456,7 @@ int unflatten_read(FILE* f, get_function_address_t gfa) {
 	TIME_MARK_START(fix_b);
 	fix_unflatten_memory(&FLCTRL.HDR,FLCTRL.mem);
 	if ((FLCTRL.HDR.fptr_count>0)&&(gfa)) {
-		unsigned char* mem = (unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t);
+		unsigned char* mem = (unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)+FLCTRL.HDR.fptr_count*sizeof(size_t)+FLCTRL.HDR.mcount*2*sizeof(size_t);
 		for (size_t fi=0; fi<FLCTRL.HDR.fptr_count; ++fi) {
 			size_t fptri = ((uintptr_t*)((unsigned char*)FLCTRL.mem+FLCTRL.HDR.ptr_count*sizeof(size_t)))[fi];
 			uintptr_t fptrv = *((uintptr_t*)(mem+fptri));
@@ -335,6 +486,7 @@ void unflatten_fini() {
     }
     free(FLCTRL.mem);
     fptrmap.clear();
+    // TODO: clear interval tree nodes and memory fragments
 }
 
 struct point {
@@ -487,11 +639,22 @@ int main(int argc, char* argv[]) {
 	printf("Size of flatten image: %zu\n",size);
 
 	unflatten_init();
-	if (!strcmp(argv[2],"CURRENTTASKM")) {
-		assert(unflatten_read(in,print_function_address) == 0);
+	if (!strncmp(argv[2],"CREAT",5)) {
+		argv[2] = argv[2]+6;
+		if (!strcmp(argv[2],"CURRENTTASKM")) {
+			assert(unflatten_create(in,print_function_address) == 0);
+		}
+		else {
+			assert(unflatten_create(in,get_fpointer_test_function_address) == 0);
+		}
 	}
 	else {
-		assert(unflatten_read(in,get_fpointer_test_function_address) == 0);
+		if (!strcmp(argv[2],"CURRENTTASKM")) {
+			assert(unflatten_read(in,print_function_address) == 0);
+		}
+		else {
+			assert(unflatten_read(in,get_fpointer_test_function_address) == 0);
+		}
 	}
 
 	if (argc>=3) {
