@@ -1313,9 +1313,9 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 	do {	\
 		DBGTF(AGGREGATE_FLATTEN_STRUCT_STORAGE,T,p,"%lx",(unsigned long)p);	\
     	if (!KFLAT_ACCESSOR->errno) {	\
-    		struct fixup_set_node* __inode = fixup_set_search((uint64_t)p);	\
+    		struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)p);	\
     		if (!__inode) {	\
-    			int err = fixup_set_reserve_address((uintptr_t)p);	\
+    			int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)p);	\
     			if (!err) {	\
     				flatten_struct_##T(KFLAT_ACCESSOR,(const struct T*)p);	\
     			}	\
@@ -1450,11 +1450,12 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
     } while(0)
 
 #define AGGREGATE_FLATTEN_STRUCT_STORAGE_ITER(T,f)	\
+	do {	\
 		DBGTF(AGGREGATE_FLATTEN_STRUCT_STORAGE_ITER,T,p,"%lx",(unsigned long)p);	\
     	if (!KFLAT_ACCESSOR->errno) {	\
-    		struct fixup_set_node* __inode = fixup_set_search((uint64_t)p);	\
+    		struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)p);	\
     		if (!__inode) {	\
-    			int err = fixup_set_reserve_address((uintptr_t)p);	\
+    			int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)p);	\
     			if (!err) {	\
     				struct flatten_job __job;   \
 					__job.node = 0;    \

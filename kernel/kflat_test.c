@@ -852,6 +852,147 @@ static int kflat_fpointer_test(struct kflat *kflat, int debug_flag) {
 
 }
 
+struct CC {
+	int i;
+};
+
+struct BB {
+	long s;
+	long n;
+	int* pi;
+	struct CC* pC;
+};
+
+struct MM {
+	const char* s;
+	struct BB arrB[4];
+	long* Lx;
+};
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(CC,
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(BB,
+		AGGREGATE_FLATTEN_TYPE_ARRAY(int,pi,ATTR(n));
+		AGGREGATE_FLATTEN_STRUCT(CC,pC);
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(MM,
+	AGGREGATE_FLATTEN_STRING(s);
+	for (int __i=0; __i<4; ++__i) {
+		const struct BB* p = ATTR(arrB)+__i;
+		AGGREGATE_FLATTEN_STRUCT_STORAGE(BB,p);
+	}
+	AGGREGATE_FLATTEN_TYPE_ARRAY(long,Lx,0);
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(CC,
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(BB,
+		AGGREGATE_FLATTEN_TYPE_ARRAY(int,pi,ATTR(n));
+		AGGREGATE_FLATTEN_STRUCT_ITER(CC,pC);
+);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(MM,
+	AGGREGATE_FLATTEN_STRING(s);
+	for (int __i=0; __i<4; ++__i) {
+		const struct BB* p = ATTR(arrB)+__i;
+		AGGREGATE_FLATTEN_STRUCT_STORAGE_ITER(BB,p);
+	}
+	AGGREGATE_FLATTEN_TYPE_ARRAY(long,Lx,0);
+);
+
+static int kflat_structarray_test(struct kflat *kflat, int debug_flag) {
+
+	struct CC c0 = {}, c1 = {1000}, c2 = {1000000};
+	int T[60] = {};
+	struct MM obM = {
+			"This is a M object here",
+			{
+					{0,3,&T[3],&c0},
+					{10,20,&T[10],&c1},
+					{15,40,&T[15],&c2},
+			},
+	};
+	unsigned char* p = (unsigned char*)&obM;
+	unsigned char* q = (unsigned char*)&obM.arrB[3].n;
+	size_t q_offset = q-p;
+	int err = 0;
+
+	for (int i=0; i<60; ++i) {
+		T[i] = i;
+	}
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	FOR_ROOT_POINTER(p,
+			FLATTEN_TYPE_ARRAY(unsigned char,p,q_offset);
+	);
+	FOR_ROOT_POINTER(q,
+			FLATTEN_TYPE_ARRAY(unsigned char,p,sizeof(struct MM)-q_offset);
+	);
+
+	FOR_ROOT_POINTER(&obM,
+		FLATTEN_STRUCT(MM,&obM);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+}
+
+static int kflat_structarray_test_iter(struct kflat *kflat, int debug_flag) {
+
+	struct CC c0 = {}, c1 = {1000}, c2 = {1000000};
+	int T[60] = {};
+	struct MM obM = {
+			"This is a M object here",
+			{
+					{0,3,&T[3],&c0},
+					{10,20,&T[10],&c1},
+					{15,40,&T[15],&c2},
+			},
+	};
+	unsigned char* p = (unsigned char*)&obM;
+	unsigned char* q = (unsigned char*)&obM.arrB[3].n;
+	size_t q_offset = q-p;
+	int err = 0;
+
+	for (int i=0; i<60; ++i) {
+		T[i] = i;
+	}
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	FOR_ROOT_POINTER(p,
+			FLATTEN_TYPE_ARRAY(unsigned char,p,q_offset);
+	);
+	FOR_ROOT_POINTER(q,
+			FLATTEN_TYPE_ARRAY(unsigned char,p,sizeof(struct MM)-q_offset);
+	);
+
+	UNDER_ITER_HARNESS(
+		FOR_ROOT_POINTER(&obM,
+			FLATTEN_STRUCT_ITER(MM,&obM);
+		);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+}
+
 enum KFLAT_TEST_CASE {
 	DEBUG_FLAG=1,
 	TEST_ITER=2,
@@ -865,6 +1006,7 @@ enum KFLAT_TEST_CASE {
 	STRINGSETM=8<<2,
 	FPOINTER=9<<2,
 	CURRENTTASKM=10<<2,
+	STRUCTARRAY=11<<2,
 };
 
 #include "kflat_test_data.h"
@@ -951,6 +1093,17 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 	if ((arg&(~0x3))==FPOINTER) {
 		err = kflat_fpointer_test(kflat,arg&0x01);
 		if (err) return err;
+	}
+
+	if ((arg&(~0x3))==STRUCTARRAY) {
+		if ((arg&2)==0) {
+			err = kflat_structarray_test(kflat,arg&0x01);
+			if (err) return err;
+		}
+		else {
+			err = kflat_structarray_test_iter(kflat,arg&0x01);
+			if (err) return err;
+		}
 	}
 
 	return 0;

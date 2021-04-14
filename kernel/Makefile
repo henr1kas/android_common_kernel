@@ -129,6 +129,7 @@ KCOV_INSTRUMENT_stackleak.o := n
 obj-y += kflat.o
 obj-y += kflat_test.o
 obj-y += kflat_impl.o
+CFLAGS_kflat_test.o:=-Wno-gcc-compat
 
 $(obj)/configs.o: $(obj)/config_data.gz
 

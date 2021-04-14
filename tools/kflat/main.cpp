@@ -629,6 +629,38 @@ uintptr_t print_function_address(const char* fsym) {
 	return 0;
 }
 
+struct CC {
+	int i;
+};
+
+struct BB {
+	long s;
+	long n;
+	int* pi;
+	struct CC* pC;
+};
+
+struct MM {
+	const char* s;
+	struct BB arrB[4];
+	long* Lx;
+};
+
+void print_struct_BB(const struct BB* pB) {
+	printf("%ld:%ld",pB->s,pB->n);
+	if (pB->pi) {
+		printf(" [ ");
+		for (long i=0; i<pB->n; ++i) {
+			printf("%d ",pB->pi[i]);
+		}
+		printf("]");
+	}
+	printf("\n");
+	if (pB->pC) {
+		printf("C: %d\n",pB->pC->i);
+	}
+}
+
 int main(int argc, char* argv[]) {
 
 	FILE* in = fopen(argv[1], "r");
@@ -751,7 +783,16 @@ int main(int argc, char* argv[]) {
 			p->ef(0,0,0);
 			p->gf(0);
 		}
-	}
+		else if (!strcmp(argv[2],"STRUCTARRAY")) {
+			const struct MM* pM = ROOT_POINTER_SEQ(const struct MM*,2);
+			printf("\n");
+			printf("pM->s: %s\n",pM->s);
+			for (int i=0; i<4; ++i) {
+				print_struct_BB(&pM->arrB[i]);
+			}
+			printf("pM->Lx: %p\n",pM->Lx);
+				}
+			}
 
 	unflatten_fini();
 	fclose(in);
