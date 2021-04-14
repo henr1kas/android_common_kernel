@@ -503,6 +503,49 @@ static int kflat_circle_test_iter(struct kflat *kflat, size_t num_points, int de
 
 }
 
+static int kflat_circle_module_test(struct kflat *kflat, size_t num_points, int debug_flag, double* cosx, double* sinx) {
+
+	struct figure circle = { "circle",num_points };
+	unsigned i, j;
+	int err = 0;
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	circle.points = kvzalloc(circle.n*sizeof(struct point),GFP_KERNEL);
+    for (i = 0; i < circle.n; ++i) {
+        MAKE_POINT(circle.points[i], i, circle.n - 1);
+    }
+    for (i = 0; i < circle.n; ++i) {
+		unsigned u = 0;
+		for (j = 0; j < circle.n; ++j) {
+			if (i == j)
+				continue;
+			circle.points[i].other[u++] = &circle.points[j];
+		}
+	}
+
+	FOR_ROOT_POINTER(&circle,
+		UNDER_ITER_HARNESS(
+			FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER(figure, &circle);
+		);
+	);
+
+	for (i = 0; i < circle.n; ++i) {
+		kvfree(circle.points[i].other);
+	}
+	kvfree(circle.points);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
 static int kflat_pointer_test(struct kflat *kflat, int debug_flag) {
 
 	double magic_number = 3.14159265359;
@@ -1007,6 +1050,7 @@ enum KFLAT_TEST_CASE {
 	FPOINTER=9<<2,
 	CURRENTTASKM=10<<2,
 	STRUCTARRAY=11<<2,
+	CIRCLEM=12<<2,
 };
 
 #include "kflat_test_data.h"
@@ -1031,6 +1075,11 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 		}
 	}
 
+	if ((arg&(~0x3))==CIRCLEM) {
+		err = kflat_circle_module_test(kflat,750,arg&0x01,cosxi,sinxi);
+		if (err) return err;
+	}
+
 	if ((arg&(~0x3))==STRINGSET) {
 		if ((arg&2)==0) {
 			err = kflat_stringset_test(kflat,50,arg&0x01);
@@ -1043,9 +1092,9 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 	}
 
 	if ((arg&(~0x3))==STRINGSETM) {
-			err = kflat_stringset_module_test(kflat,200000,arg&0x01);
-			if (err) return err;
-		}
+		err = kflat_stringset_module_test(kflat,200000,arg&0x01);
+		if (err) return err;
+	}
 
 	if ((arg&(~0x3))==POINTER) { /* Always recursive */
 		err = kflat_pointer_test(kflat,arg&0x01);

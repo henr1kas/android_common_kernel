@@ -118,6 +118,7 @@ int recipe_delete(const char* s) {
 	struct recipe_node* node = recipe_search(s);
 	if (node) {
 		rb_erase(&node->node, &recipe_fns);
+		return 1;
 	}
 	return 0;
 }
@@ -1064,6 +1065,7 @@ struct flatten_pointer* get_pointer_node(struct kflat* kflat, const void* _ptr) 
 		return make_flatten_pointer(node,0);
 	}
 }
+EXPORT_SYMBOL(get_pointer_node);
 
 struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr, size_t _sz) {
 

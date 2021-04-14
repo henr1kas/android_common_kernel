@@ -256,14 +256,21 @@ static inline size_t ptrarrmemlen(const void* const* m) {
 #define DBGS(...)						do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(__VA_ARGS__); } while(0)
 #define DBGM1(name,a1)					do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_info(#name "(" #a1 ")\n"); } while(0)
 #define DBGF(name,F,FMT,P)				do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #F "[" FMT "])\n",P); } while(0)
+#define DBGOF(name,F,FMT,P,Q)			do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #F "[" FMT "])\n",P,Q); } while(0)
 #define DBGM2(name,a1,a2)				do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_info(#name "(" #a1 "," #a2 ")\n"); } while(0)
 #define DBGTF(name,T,F,FMT,P)			do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #T "," #F "[" FMT "])\n",P); } while(0)
+#define DBGTNF(name,T,N,F,FMT,P)		do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #T "," #N "," #F "[" FMT "])\n",P); } while(0)
 #define DBGTFMF(name,T,F,FMT,P,PF,FF)	do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #T "," #F "[" FMT "]," #PF "," #FF ")\n",P); } while(0)
+#define DBGTFOMF(name,T,F,FMT,P,Q,PF,FF) do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #T "," #F "[" FMT "]," #PF "," #FF ")\n",P,Q); } while(0)
+#define DBGTNFOMF(name,T,N,F,FMT,P,Q,PF,FF) do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #T "," #N "," #F "[" FMT "]," #PF "," #FF ")\n",P,Q); } while(0)
 #define DBGTP(name,T,P)					do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #T "," #P "[%lx])\n",P); } while(0)
+#define DBGTNP(name,T,N,P)				do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_infos(#name "(" #T "," #N "," #P "[%lx])\n",P); } while(0)
 #define DBGM3(name,a1,a2,a3)			do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_info(#name "(" #a1 "," #a2 "," #a3 ")\n"); } while(0)
 #define DBGM4(name,a1,a2,a3,a4)			do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_info(#name "(" #a1 "," #a2 "," #a3 "," #a4 ")\n"); } while(0)
+#define DBGM5(name,a1,a2,a3,a4,a5)		do { if (KFLAT_ACCESSOR->FLCTRL.debug_flag&1) flat_info(#name "(" #a1 "," #a2 "," #a3 "," #a4 "," #a5 ")\n"); } while(0)
 
 #define ATTR(f)	((_ptr)->f)
+#define OFFATTR(T,_off)	(*((T*)((unsigned char*)(_ptr)+_off)))
 
 #define STRUCT_ALIGN(n)		do { _alignment=n; } while(0)
 
@@ -369,6 +376,110 @@ struct flatten_pointer* flatten_struct_type_##FLTYPE##_array_iter(struct kflat* 
 }
 
 #define FUNCTION_DECLARE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)    \
+	extern struct flatten_pointer* flatten_struct_type_##FLTYPE##_array_iter(struct kflat* kflat, const FLTYPE* _ptr, size_t n, struct bqueue* __q);
+
+#define FUNCTION_DEFINE_FLATTEN_STRUCT_ARRAY_SELF_CONTAINED(FLTYPE,FLSIZE)	\
+struct flatten_pointer* flatten_struct_##FLTYPE##_array(struct kflat* kflat, const struct FLTYPE* _ptr, size_t n) {	\
+	size_t _i;	\
+	void* _fp_first=0;	\
+	DBGS("flatten_struct_" #FLTYPE "_array(%lx,%zu)\n",(uintptr_t)_ptr,n);	\
+	for (_i=0; _i<n; ++_i) {	\
+		void* _fp = (void*)flatten_struct_##FLTYPE(kflat,(struct FLTYPE*)((unsigned char*)_ptr+_i*FLSIZE));	\
+		if (!_fp) {	\
+			if (_fp_first) {	\
+				libflat_free(_fp_first);	\
+			}	\
+			break;	\
+		}	\
+		if (!_fp_first) _fp_first=_fp;	\
+		else libflat_free(_fp);	\
+	}	\
+	if (kflat->errno) {	\
+		return 0;	\
+	}	\
+    return _fp_first;	\
+}
+
+#define FUNCTION_DECLARE_FLATTEN_STRUCT_ARRAY_SELF_CONTAINED(FLTYPE,FLSIZE)	\
+	extern struct flatten_pointer* flatten_struct_##FLTYPE##_array(struct kflat* kflat, const struct FLTYPE* _ptr, size_t n);
+
+#define FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_SELF_CONTAINED(FLTYPE,FLSIZE)	\
+struct flatten_pointer* flatten_struct_type_##FLTYPE##_array(struct kflat* kflat, const FLTYPE* _ptr, size_t n) {	\
+    size_t _i;	\
+	void* _fp_first=0;	\
+	DBGS("flatten_struct_type_" #FLTYPE "_array(%lx,%zu)\n",(uintptr_t)_ptr,n);	\
+	for (_i=0; _i<n; ++_i) {	\
+		void* _fp = (void*)flatten_struct_type_##FLTYPE(kflat,(FLTYPE*)((unsigned char*)_ptr+_i*FLSIZE));	\
+		if (!_fp) {	\
+			if (_fp_first) {	\
+				libflat_free(_fp_first);	\
+			}	\
+			break;	\
+		}	\
+		if (!_fp_first) _fp_first=_fp;	\
+		else libflat_free(_fp);	\
+	}	\
+	if (kflat->errno) {	\
+		return 0;	\
+	}	\
+    return _fp_first;	\
+}
+
+#define FUNCTION_DECLARE_FLATTEN_STRUCT_TYPE_ARRAY_SELF_CONTAINED(FLTYPE,FLSIZE)	\
+	extern struct flatten_pointer* flatten_struct_type_##FLTYPE##_array(struct kflat* kflat, const FLTYPE* _ptr, size_t n);
+
+#define FUNCTION_DEFINE_FLATTEN_STRUCT_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE) \
+struct flatten_pointer* flatten_struct_##FLTYPE##_array_iter(struct kflat* kflat, const struct FLTYPE* _ptr, size_t n, struct bqueue* __q) {    \
+    size_t _i;  \
+    void* _fp_first=0;  \
+    DBGS("flatten_struct_" #FLTYPE "_array_iter(%lx,%zu)\n",(uintptr_t)_ptr,n);	\
+	for (_i=0; _i<n; ++_i) {    \
+		void* _fp = (void*)flatten_struct_##FLTYPE##_iter(kflat,(struct FLTYPE*)((unsigned char*)_ptr+_i*FLSIZE),__q);    \
+		if (!_fp) {	\
+			if (_fp_first) {	\
+				libflat_free(_fp_first);	\
+			}	\
+			break;	\
+		}	\
+		if (!_fp_first) _fp_first=_fp;  \
+		else libflat_free(_fp); \
+	}   \
+	if (kflat->errno) {	\
+		return 0;	\
+	}	\
+	else {	\
+		return _fp_first;   \
+	}	\
+}
+
+#define FUNCTION_DECLARE_FLATTEN_STRUCT_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE) \
+	extern struct flatten_pointer* flatten_struct_##FLTYPE##_array_iter(struct kflat* kflat, const struct FLTYPE* _ptr, size_t n, struct bqueue* __q);
+
+#define FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE)    \
+struct flatten_pointer* flatten_struct_type_##FLTYPE##_array_iter(struct kflat* kflat, const FLTYPE* _ptr, size_t n, struct bqueue* __q) {    \
+	size_t _i;  \
+	void* _fp_first=0;  \
+	DBGS("flatten_struct_type_" #FLTYPE "_array_iter(%lx,%zu)\n",(uintptr_t)_ptr,n);	\
+	for (_i=0; _i<n; ++_i) {    \
+		void* _fp = (void*)flatten_struct_type_##FLTYPE##_iter(kflat,(FLTYPE*)((unsigned char*)_ptr+_i*FLSIZE),__q);    \
+		if (!_fp) {	\
+			if (_fp_first) {	\
+				libflat_free(_fp_first);	\
+			}	\
+			break;	\
+		}	\
+		if (!_fp_first) _fp_first=_fp;  \
+		else libflat_free(_fp); \
+	}   \
+	if (kflat->errno) {	\
+		return 0;	\
+	}	\
+	else {	\
+		return _fp_first;   \
+	}	\
+}
+
+#define FUNCTION_DECLARE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE)    \
 	extern struct flatten_pointer* flatten_struct_type_##FLTYPE##_array_iter(struct kflat* kflat, const FLTYPE* _ptr, size_t n, struct bqueue* __q);
 
 #define FUNCTION_DEFINE_FLATTEN_STRUCT(FLTYPE,...)	\
@@ -492,6 +603,122 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_ARRAY(FLTYPE)
 	extern struct flatten_pointer* flatten_struct_##FLTYPE(struct kflat* kflat, const struct FLTYPE*);	\
 	FUNCTION_DECLARE_FLATTEN_STRUCT_ARRAY(FLTYPE)
 
+#define FUNCTION_DEFINE_FLATTEN_STRUCT_SELF_CONTAINED(FLTYPE,FLSIZE,...)	\
+			\
+struct flatten_pointer* flatten_struct_##FLTYPE(struct kflat* kflat, const struct FLTYPE* _ptr) {	\
+			\
+	size_t _alignment = 0;	\
+	struct flatten_pointer* r = 0;	\
+	size_t _node_offset;	\
+			\
+	struct flat_node *__node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uint64_t)_ptr, (uint64_t)_ptr+FLSIZE-1);	\
+	(void*)_ptr;	\
+	DBGS("flatten_struct_" #FLTYPE "(%lx): [%zu]\n",(uintptr_t)_ptr,FLSIZE);	\
+	if (__node) {	\
+		uintptr_t p = (uintptr_t)_ptr;	\
+    	struct flat_node *prev;	\
+    	while(__node) {	\
+			if (__node->start>p) {	\
+				struct flat_node* nn;	\
+				if (__node->storage==0) {	\
+					kflat->errno = EFAULT;	\
+					DBGS("flatten_struct_" #FLTYPE "(%lx): EFAULT (__node(%lx)->storage==0)\n",(uintptr_t)_ptr,__node);	\
+					return 0;	\
+				}	\
+				nn = libflat_zalloc(sizeof(struct flat_node),1);	\
+				if (nn==0) {	\
+					kflat->errno = ENOMEM;	\
+					DBGS("flatten_struct_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+					return 0;	\
+				}	\
+				nn->start = p;	\
+				nn->last = __node->start-1;	\
+				nn->storage = binary_stream_insert_front(kflat,(void*)p,__node->start-p,__node->storage);	\
+				interval_tree_insert(nn, &kflat->FLCTRL.imap_root);	\
+			}	\
+			p = __node->last+1;	\
+			prev = __node;	\
+			__node = interval_tree_iter_next(__node, (uintptr_t)_ptr, (uintptr_t)_ptr+FLSIZE-1);	\
+		}	\
+		if ((uintptr_t)_ptr+sizeof(struct FLTYPE)>p) {	\
+			struct flat_node* nn;	\
+			if (prev->storage==0) {	\
+				kflat->errno = EFAULT;	\
+				DBGS("flatten_struct_" #FLTYPE "(%lx): EFAULT (prev(%lx)->storage==0)\n",(uintptr_t)_ptr,prev);	\
+				return 0;	\
+			}	\
+			nn = libflat_zalloc(sizeof(struct flat_node),1);	\
+			if (nn==0) {	\
+				kflat->errno = ENOMEM;	\
+				DBGS("flatten_struct_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+				return 0;	\
+			}	\
+			nn->start = p;	\
+			nn->last = (uintptr_t)_ptr+FLSIZE-1;	\
+			nn->storage = binary_stream_insert_back(kflat,(void*)p,(uintptr_t)_ptr+FLSIZE-p,prev->storage);	\
+			interval_tree_insert(nn, &kflat->FLCTRL.imap_root);	\
+		}	\
+	}	\
+	else {	\
+		struct blstream* storage;	\
+		struct rb_node* rb;	\
+		struct rb_node* prev;	\
+		__node = libflat_zalloc(sizeof(struct flat_node),1);	\
+		if (!__node) {	\
+			kflat->errno = ENOMEM;	\
+			DBGS("flatten_struct_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+			return 0;	\
+		}	\
+		__node->start = (uint64_t)_ptr;	\
+		__node->last = (uint64_t)_ptr + FLSIZE-1;	\
+		interval_tree_insert(__node, &kflat->FLCTRL.imap_root);	\
+		rb = &__node->rb;	\
+		prev = rb_prev(rb);	\
+		if (prev) {	\
+			storage = binary_stream_insert_back(kflat,_ptr,FLSIZE,((struct flat_node*)prev)->storage);	\
+		}	\
+		else {	\
+			struct rb_node* next = rb_next(rb);	\
+			if (next) {	\
+				storage = binary_stream_insert_front(kflat,_ptr,FLSIZE,((struct flat_node*)next)->storage);	\
+			}	\
+			else {	\
+				storage = binary_stream_append(kflat,_ptr,FLSIZE);	\
+			}	\
+		}	\
+		if (!storage) {	\
+			kflat->errno = ENOMEM;	\
+			DBGS("flatten_struct_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+			return 0;	\
+		}	\
+		__node->storage = storage;	\
+	}	\
+		\
+	__VA_ARGS__	\
+	if (kflat->errno) {   \
+		DBGS("flatten_struct_" #FLTYPE "(%lx): %d\n",(uintptr_t)_ptr,kflat->errno);	\
+		return 0;	\
+	}	\
+	__node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uint64_t)_ptr, (uint64_t)_ptr+sizeof(struct FLTYPE*)-1);    \
+	if (__node==0) {	\
+		kflat->errno = EFAULT;	\
+		DBGS("flatten_struct_" #FLTYPE "(%lx): EFAULT (__node==0)\n",(uintptr_t)_ptr);	\
+		return 0;	\
+	}	\
+	_node_offset = (uint64_t)_ptr-__node->start;	\
+	__node->storage->alignment = _alignment;	\
+	__node->storage->align_offset = _node_offset;	\
+    r = make_flatten_pointer(__node,_node_offset);	\
+    if (!r) {	\
+    	kflat->errno = ENOMEM;	\
+    	DBGS("flatten_struct_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+    	return 0;	\
+    }	\
+	return r;	\
+}	\
+\
+FUNCTION_DEFINE_FLATTEN_STRUCT_ARRAY_SELF_CONTAINED(FLTYPE,FLSIZE)
+
 #define FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE(FLTYPE,...)	\
 			\
 struct flatten_pointer* flatten_struct_type_##FLTYPE(struct kflat* kflat, const FLTYPE* _ptr) {	\
@@ -612,6 +839,122 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY(FLTYPE)
 #define FUNCTION_DECLARE_FLATTEN_STRUCT_TYPE(FLTYPE)	\
 	extern struct flatten_pointer* flatten_struct_type_##FLTYPE(struct kflat* kflat, const FLTYPE*);	\
 	FUNCTION_DECLARE_FLATTEN_STRUCT_TYPE_ARRAY(FLTYPE)
+
+#define FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_SELF_CONTAINED(FLTYPE,FLSIZE,...)	\
+			\
+struct flatten_pointer* flatten_struct_type_##FLTYPE(struct kflat* kflat, const FLTYPE* _ptr) {	\
+			\
+	size_t _alignment = 0;	\
+	struct flatten_pointer* r = 0;	\
+	size_t _node_offset;	\
+			\
+	struct flat_node *__node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uint64_t)_ptr, (uint64_t)_ptr+FLSIZE-1);	\
+	(void*)_ptr;	\
+	DBGS("flatten_struct_type_" #FLTYPE "(%lx): [%zu]\n",(uintptr_t)_ptr,FLSIZE);	\
+	if (__node) {	\
+		uintptr_t p = (uintptr_t)_ptr;	\
+    	struct flat_node *prev;	\
+    	while(__node) {	\
+			if (__node->start>p) {	\
+				struct flat_node* nn;	\
+				if (__node->storage==0) {	\
+					kflat->errno = EFAULT;	\
+					DBGS("flatten_struct_type_" #FLTYPE "(%lx): EFAULT (__node(%lx)->storage==0)\n",(uintptr_t)_ptr,__node);	\
+					return 0;	\
+				}	\
+				nn = libflat_zalloc(sizeof(struct flat_node),1);	\
+				if (nn==0) {	\
+					kflat->errno = ENOMEM;	\
+					DBGS("flatten_struct_type_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+					return 0;	\
+				}	\
+				nn->start = p;	\
+				nn->last = __node->start-1;	\
+				nn->storage = binary_stream_insert_front(kflat,(void*)p,__node->start-p,__node->storage);	\
+				interval_tree_insert(nn, &kflat->FLCTRL.imap_root);	\
+			}	\
+			p = __node->last+1;	\
+			prev = __node;	\
+			__node = interval_tree_iter_next(__node, (uintptr_t)_ptr, (uintptr_t)_ptr+FLSIZE-1);	\
+		}	\
+		if ((uintptr_t)_ptr+FLSIZE>p) {	\
+			struct flat_node* nn;	\
+			if (prev->storage==0) {	\
+				kflat->errno = EFAULT;	\
+				DBGS("flatten_struct_type_" #FLTYPE "(%lx): EFAULT (prev(%lx)->storage==0)\n",(uintptr_t)_ptr,prev);	\
+				return 0;	\
+			}	\
+			nn = libflat_zalloc(sizeof(struct flat_node),1);	\
+			if (nn==0) {	\
+				kflat->errno = ENOMEM;	\
+				DBGS("flatten_struct_type_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+				return 0;	\
+			}	\
+			nn->start = p;	\
+			nn->last = (uintptr_t)_ptr+FLSIZE-1;	\
+			nn->storage = binary_stream_insert_back(kflat,(void*)p,(uintptr_t)_ptr+FLSIZE-p,prev->storage);	\
+			interval_tree_insert(nn, &kflat->FLCTRL.imap_root);	\
+		}	\
+	}	\
+	else {	\
+		struct blstream* storage;	\
+		struct rb_node* rb;	\
+		struct rb_node* prev;	\
+		__node = libflat_zalloc(sizeof(struct flat_node),1);	\
+		if (!__node) {	\
+			kflat->errno = ENOMEM;	\
+			DBGS("flatten_struct_type_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+			return 0;	\
+		}	\
+		__node->start = (uint64_t)_ptr;	\
+		__node->last = (uint64_t)_ptr + sizeof(FLTYPE)-1;	\
+		interval_tree_insert(__node, &kflat->FLCTRL.imap_root);	\
+		rb = &__node->rb;	\
+		prev = rb_prev(rb);	\
+		if (prev) {	\
+			storage = binary_stream_insert_back(kflat,_ptr,FLSIZE,((struct flat_node*)prev)->storage);	\
+		}	\
+		else {	\
+			struct rb_node* next = rb_next(rb);	\
+			if (next) {	\
+				storage = binary_stream_insert_front(kflat,_ptr,FLSIZE,((struct flat_node*)next)->storage);	\
+			}	\
+			else {	\
+				storage = binary_stream_append(kflat,_ptr,FLSIZE);	\
+			}	\
+		}	\
+		if (!storage) {	\
+			kflat->errno = ENOMEM;	\
+			DBGS("flatten_struct_type_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+			return 0;	\
+		}	\
+		__node->storage = storage;	\
+	}	\
+		\
+	__VA_ARGS__	\
+	if (kflat->errno) {   \
+		DBGS("flatten_struct_type_" #FLTYPE "(%lx): %d\n",(uintptr_t)_ptr,kflat->errno);	\
+		return 0;	\
+	}	\
+	__node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uint64_t)_ptr, (uint64_t)_ptr+sizeof(FLTYPE*)-1);    \
+	if (__node==0) {	\
+		kflat->errno = EFAULT;	\
+		DBGS("flatten_struct_type_" #FLTYPE "(%lx): EFAULT (__node==0)\n",(uintptr_t)_ptr);	\
+		return 0;	\
+	}	\
+	_node_offset = (uint64_t)_ptr-__node->start;	\
+	__node->storage->alignment = _alignment;	\
+	__node->storage->align_offset = _node_offset;	\
+    r = make_flatten_pointer(__node,_node_offset);	\
+    if (!r) {	\
+    	kflat->errno = ENOMEM;	\
+    	DBGS("flatten_struct_type_" #FLTYPE "(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+    	return 0;	\
+    }	\
+	return r;	\
+}	\
+\
+FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_SELF_CONTAINED(FLTYPE,FLSIZE)
 
 #define FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(FLTYPE,...)  \
 			\
@@ -734,6 +1077,122 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_ARRAY_ITER(FLTYPE)
     extern struct flatten_pointer* flatten_struct_##FLTYPE##_iter(struct kflat* kflat, const struct FLTYPE*, struct bqueue*);	\
     FUNCTION_DECLARE_FLATTEN_STRUCT_ARRAY_ITER(FLTYPE)
 
+#define FUNCTION_DEFINE_FLATTEN_STRUCT_ITER_SELF_CONTAINED(FLTYPE,FLSIZE,...)  \
+			\
+struct flatten_pointer* flatten_struct_##FLTYPE##_iter(struct kflat* kflat, const struct FLTYPE* _ptr, struct bqueue* __q) {    \
+            \
+    size_t _alignment = 0;  \
+    struct flatten_pointer* r = 0;	\
+    size_t _node_offset;	\
+            \
+    struct flat_node *__node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uint64_t)_ptr, (uint64_t)_ptr+FLSIZE-1);    \
+    (void*)_ptr;	\
+    DBGS("flatten_struct_" #FLTYPE "_iter(%lx): [%zu]\n",(uintptr_t)_ptr,FLSIZE);	\
+	if (__node) {	\
+		uintptr_t p = (uintptr_t)_ptr;	\
+    	struct flat_node *prev;	\
+    	while(__node) {	\
+			if (__node->start>p) {	\
+				struct flat_node* nn;	\
+				if (__node->storage==0) {	\
+					kflat->errno = EFAULT;	\
+					DBGS("flatten_struct_" #FLTYPE "_iter(%lx): EFAULT (__node(%lx)->storage==0)\n",(uintptr_t)_ptr,__node);	\
+					return 0;	\
+				}	\
+				nn = libflat_zalloc(sizeof(struct flat_node),1);	\
+				if (nn==0) {	\
+					kflat->errno = ENOMEM;	\
+					DBGS("flatten_struct_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+					return 0;	\
+				}	\
+				nn->start = p;	\
+				nn->last = __node->start-1;	\
+				nn->storage = binary_stream_insert_front(kflat,(void*)p,__node->start-p,__node->storage);	\
+				interval_tree_insert(nn, &kflat->FLCTRL.imap_root);	\
+			}	\
+			p = __node->last+1;	\
+			prev = __node;	\
+			__node = interval_tree_iter_next(__node, (uintptr_t)_ptr, (uintptr_t)_ptr+FLSIZE-1);	\
+		}	\
+		if ((uintptr_t)_ptr+FLSIZE>p) {	\
+			struct flat_node* nn;	\
+			if (prev->storage==0) {	\
+				kflat->errno = EFAULT;	\
+				DBGS("flatten_struct_" #FLTYPE "_iter(%lx): EFAULT (prev(%lx)->storage==0)\n",(uintptr_t)_ptr,prev);	\
+				return 0;	\
+			}	\
+			nn = libflat_zalloc(sizeof(struct flat_node),1);	\
+			if (nn==0) {	\
+				kflat->errno = ENOMEM;	\
+				DBGS("flatten_struct_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+				return 0;	\
+			}	\
+			nn->start = p;	\
+			nn->last = (uintptr_t)_ptr+FLSIZE-1;	\
+			nn->storage = binary_stream_insert_back(kflat,(void*)p,(uintptr_t)_ptr+FLSIZE-p,prev->storage);	\
+			interval_tree_insert(nn, &kflat->FLCTRL.imap_root);	\
+		}	\
+	}	\
+    else {  \
+    	struct blstream* storage;   \
+    	struct rb_node* rb;	\
+    	struct rb_node* prev;	\
+    	__node = libflat_zalloc(sizeof(struct flat_node),1);   \
+    	if (!__node) {	\
+    		kflat->errno = ENOMEM;	\
+    		DBGS("flatten_struct_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+			return 0;	\
+		}	\
+        __node->start = (uint64_t)_ptr; \
+        __node->last = (uint64_t)_ptr + FLSIZE-1;    \
+        interval_tree_insert(__node, &kflat->FLCTRL.imap_root);   \
+        rb = &__node->rb;	\
+        prev = rb_prev(rb); \
+        if (prev) { \
+            storage = binary_stream_insert_back(kflat,_ptr,FLSIZE,((struct flat_node*)prev)->storage);    \
+        }   \
+        else {  \
+            struct rb_node* next = rb_next(rb); \
+            if (next) { \
+                storage = binary_stream_insert_front(kflat,_ptr,FLSIZE,((struct flat_node*)next)->storage);   \
+            }   \
+            else {  \
+                storage = binary_stream_append(kflat,_ptr,FLSIZE); \
+            }   \
+        }   \
+		if (!storage) {	\
+			kflat->errno = ENOMEM;	\
+			DBGS("flatten_struct_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+			return 0;	\
+		}	\
+        __node->storage = storage;  \
+    }   \
+        \
+    __VA_ARGS__ \
+	if (kflat->errno) {   \
+		DBGS("flatten_struct_" #FLTYPE "_iter(%lx): %d\n",(uintptr_t)_ptr,kflat->errno);	\
+		return 0;	\
+	}	\
+	__node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uint64_t)_ptr, (uint64_t)_ptr+sizeof(struct FLTYPE*)-1);    \
+	if (__node==0) {	\
+		kflat->errno = EFAULT;	\
+		DBGS("flatten_struct_" #FLTYPE "_iter(%lx): EFAULT (__node==0)\n",(uintptr_t)_ptr);	\
+		return 0;	\
+	}	\
+	_node_offset = (uint64_t)_ptr-__node->start;	\
+	__node->storage->alignment = _alignment;	\
+	__node->storage->align_offset = _node_offset;	\
+    r = make_flatten_pointer(__node,_node_offset);	\
+    if (!r) {	\
+    	kflat->errno = ENOMEM;	\
+    	DBGS("flatten_struct_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+    	return 0;	\
+    }	\
+	return r;	\
+}	\
+\
+FUNCTION_DEFINE_FLATTEN_STRUCT_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE)
+
 #define FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ITER(FLTYPE,...)  \
             \
 struct flatten_pointer* flatten_struct_type_##FLTYPE##_iter(struct kflat* kflat, const FLTYPE* _ptr, struct bqueue* __q) {    \
@@ -854,6 +1313,122 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 #define FUNCTION_DECLARE_FLATTEN_STRUCT_TYPE_ITER(FLTYPE) \
 	extern struct flatten_pointer* flatten_struct_type_##FLTYPE##_iter(struct kflat* kflat, const FLTYPE*, struct bqueue*);	\
 	FUNCTION_DECLARE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
+
+#define FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ITER_SELF_CONTAINED(FLTYPE,FLSIZE,...)  \
+            \
+struct flatten_pointer* flatten_struct_type_##FLTYPE##_iter(struct kflat* kflat, const FLTYPE* _ptr, struct bqueue* __q) {    \
+			\
+	size_t _alignment = 0;  \
+	struct flatten_pointer* r = 0;	\
+	size_t _node_offset;	\
+			\
+	struct flat_node *__node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uint64_t)_ptr, (uint64_t)_ptr+FLSIZE-1);    \
+	(void*)_ptr;	\
+	DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): [%zu]\n",(uintptr_t)_ptr,FLSIZE);	\
+	if (__node) {	\
+		uintptr_t p = (uintptr_t)_ptr;	\
+    	struct flat_node *prev;	\
+    	while(__node) {	\
+			if (__node->start>p) {	\
+				struct flat_node* nn;	\
+				if (__node->storage==0) {	\
+					kflat->errno = EFAULT;	\
+					DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): EFAULT (__node(%lx)->storage==0)\n",(uintptr_t)_ptr,__node);	\
+					return 0;	\
+				}	\
+				nn = libflat_zalloc(sizeof(struct flat_node),1);	\
+				if (nn==0) {	\
+					kflat->errno = ENOMEM;	\
+					DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+					return 0;	\
+				}	\
+				nn->start = p;	\
+				nn->last = __node->start-1;	\
+				nn->storage = binary_stream_insert_front(kflat,(void*)p,__node->start-p,__node->storage);	\
+				interval_tree_insert(nn, &kflat->FLCTRL.imap_root);	\
+			}	\
+			p = __node->last+1;	\
+			prev = __node;	\
+			__node = interval_tree_iter_next(__node, (uintptr_t)_ptr, (uintptr_t)_ptr+FLSIZE-1);	\
+		}	\
+		if ((uintptr_t)_ptr+FLSIZE>p) {	\
+			struct flat_node* nn;	\
+			if (prev->storage==0) {	\
+				kflat->errno = EFAULT;	\
+				DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): EFAULT (prev(%lx)->storage==0)\n",(uintptr_t)_ptr,prev);	\
+				return 0;	\
+			}	\
+			nn = libflat_zalloc(sizeof(struct flat_node),1);	\
+			if (nn==0) {	\
+				kflat->errno = ENOMEM;	\
+				DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+				return 0;	\
+			}	\
+			nn->start = p;	\
+			nn->last = (uintptr_t)_ptr+FLSIZE-1;	\
+			nn->storage = binary_stream_insert_back(kflat,(void*)p,(uintptr_t)_ptr+FLSIZE-p,prev->storage);	\
+			interval_tree_insert(nn, &kflat->FLCTRL.imap_root);	\
+		}	\
+	}	\
+	else {  \
+		struct blstream* storage;   \
+		struct rb_node* rb;	\
+		struct rb_node* prev;	\
+		__node = libflat_zalloc(sizeof(struct flat_node),1);   \
+		if (!__node) {	\
+			kflat->errno = ENOMEM;	\
+			DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+			return 0;	\
+		}	\
+		__node->start = (uint64_t)_ptr; \
+		__node->last = (uint64_t)_ptr + FLSIZE-1;    \
+		interval_tree_insert(__node, &kflat->FLCTRL.imap_root);   \
+		rb = &__node->rb;	\
+		prev = rb_prev(rb); \
+		if (prev) { \
+			storage = binary_stream_insert_back(kflat,_ptr,FLSIZE,((struct flat_node*)prev)->storage);    \
+		}   \
+		else {  \
+			struct rb_node* next = rb_next(rb); \
+			if (next) { \
+				storage = binary_stream_insert_front(kflat,_ptr,FLSIZE,((struct flat_node*)next)->storage);   \
+			}   \
+			else {  \
+				storage = binary_stream_append(kflat,_ptr,FLSIZE); \
+			}   \
+		}   \
+		if (!storage) {	\
+			kflat->errno = ENOMEM;	\
+			DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+			return 0;	\
+		}	\
+		__node->storage = storage;  \
+	}   \
+		\
+	__VA_ARGS__ \
+	if (kflat->errno) {   \
+		DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): %d\n",(uintptr_t)_ptr,kflat->errno);	\
+		return 0;	\
+	}	\
+	__node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uint64_t)_ptr, (uint64_t)_ptr+sizeof(struct FLTYPE*)-1);    \
+	if (__node==0) {	\
+		kflat->errno = EFAULT;	\
+		DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): EFAULT (__node==0)\n",(uintptr_t)_ptr);	\
+		return 0;	\
+	}	\
+	_node_offset = (uint64_t)_ptr-__node->start;	\
+	__node->storage->alignment = _alignment;	\
+	__node->storage->align_offset = _node_offset;	\
+    r = make_flatten_pointer(__node,_node_offset);	\
+    if (!r) {	\
+    	kflat->errno = ENOMEM;	\
+    	DBGS("flatten_struct_type_" #FLTYPE "_iter(%lx): ENOMEM\n",(uintptr_t)_ptr);	\
+    	return 0;	\
+    }	\
+	return r;	\
+}	\
+\
+FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE)
 
 #define FLATTEN_STRUCT(T,p)	\
 	do {	\
@@ -1155,6 +1730,140 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 		}	\
 	} while(0)
 
+#define FLATTEN_STRUCT_SELF_CONTAINED(T,N,p)	\
+	do {	\
+		DBGTNP(FLATTEN_STRUCT,T,N,p);	\
+		if (p&&(!KFLAT_ACCESSOR->errno)) {   \
+			struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uintptr_t)p);	\
+			if (!__inode) {	\
+				int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)p);	\
+				if (err) {	\
+					DBGS("FLATTEN_STRUCT:fixup_set_reserve_address(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+				else {	\
+					err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,flatten_struct_##T(KFLAT_ACCESSOR,(p)));	\
+					if ((err) && (err!=EINVAL) && (err!=EEXIST)) {	\
+						DBGS("FLATTEN_STRUCT:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+			else {	\
+				struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)p,\
+						(uintptr_t)p+N-1);    \
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,make_flatten_pointer(__node,(uintptr_t)p-__node->start));	\
+				if ((err) && (err!=EEXIST)) {	\
+					DBGS("FLATTEN_STRUCT:fixup_set_insert(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define FLATTEN_STRUCT_TYPE_SELF_CONTAINED(T,N,p)	\
+	do {	\
+		DBGTNP(FLATTEN_STRUCT_TYPE,T,N,p);	\
+		if (p&&(!KFLAT_ACCESSOR->errno)) {   \
+			struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uintptr_t)p);	\
+			if (!__inode) {	\
+				int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)p);	\
+				if (err) {	\
+					DBGS("FLATTEN_STRUCT_TYPE:fixup_set_reserve_address(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+				else {	\
+					err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,flatten_struct_type_##T(KFLAT_ACCESSOR,(p)));	\
+					if ((err) && (err!=EINVAL) && (err!=EEXIST)) {	\
+						DBGS("FLATTEN_STRUCT_TYPE:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+			else {	\
+				struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)p,\
+						(uintptr_t)p+N-1);    \
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,make_flatten_pointer(__node,(uintptr_t)p-__node->start));	\
+				if ((err) && (err!=EEXIST)) {	\
+					DBGS("FLATTEN_STRUCT_TYPE:fixup_set_insert(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define FLATTEN_STRUCT_ITER_SELF_CONTAINED(T,N,p)	\
+	do {    \
+        DBGTNP(FLATTEN_STRUCT_ITER,T,N,p);  \
+        if (p&&(!KFLAT_ACCESSOR->errno)) {   \
+			struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uintptr_t)p);	\
+			if (!__inode) {	\
+				int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)p);	\
+				if (err) {	\
+					DBGS("FLATTEN_STRUCT_ITER:fixup_set_reserve_address(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+				else {	\
+					err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,flatten_struct_##T##_iter(KFLAT_ACCESSOR,(p),__q));	\
+					if ((err) && (err!=EINVAL) && (err!=EEXIST)) {	\
+						DBGS("FLATTEN_STRUCT_ITER:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+			else {	\
+				struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)p,\
+						(uintptr_t)p+N-1);    \
+				if (__node==0) {	\
+					KFLAT_ACCESSOR->errno = EFAULT;	\
+				}	\
+				else {	\
+					int err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,make_flatten_pointer(__node,(uintptr_t)p-__node->start));	\
+					if ((err) && (err!=EEXIST)) {	\
+						DBGS("FLATTEN_STRUCT_ITER:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+        }   \
+    } while(0)
+
+#define FLATTEN_STRUCT_TYPE_ITER_SELF_CONTAINED(T,N,p)	\
+	do {    \
+        DBGTNP(FLATTEN_STRUCT_TYPE_ITER,T,N,p);  \
+        if (p&&(!KFLAT_ACCESSOR->errno)) {   \
+			struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uintptr_t)p);	\
+			if (!__inode) {	\
+				int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)p);	\
+				if (err) {	\
+					DBGS("FLATTEN_STRUCT_TYPE_ITER:fixup_set_reserve_address(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+				else {	\
+					err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,flatten_struct_type_##T##_iter(KFLAT_ACCESSOR,(p),__q));	\
+					if ((err) && (err!=EINVAL) && (err!=EEXIST)) {	\
+						DBGS("FLATTEN_STRUCT_TYPE_ITER:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+			else {	\
+				struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)p,\
+						(uintptr_t)p+N-1);    \
+				if (__node==0) {	\
+					KFLAT_ACCESSOR->errno = EFAULT;	\
+				}	\
+				else {	\
+					int err = fixup_set_insert(KFLAT_ACCESSOR,__fptr->node,__fptr->offset,make_flatten_pointer(__node,(uintptr_t)p-__node->start));	\
+					if ((err) && (err!=EEXIST)) {	\
+						DBGS("FLATTEN_STRUCT_TYPE_ITER:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+        }   \
+    } while(0)
+
 #define FLATTEN_STRUCT_ARRAY(T,p,n)	\
 	do {	\
 		DBGM3(FLATTEN_STRUCT_ARRAY,T,p,n);	\
@@ -1254,7 +1963,7 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 						int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
 							make_flatten_pointer(__struct_node,(uintptr_t)ATTR(f)-__struct_node->start));	\
 						if ((err) && (err!=EEXIST)) {	\
-							DBGS("FLATTEN_STRUCT:fixup_set_insert(): err(%d)\n",err);	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
 							KFLAT_ACCESSOR->errno = err;	\
 						}	\
 					}	\
@@ -1517,14 +2226,14 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 				if (!__inode) {	\
 					int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)_fp);	\
 					if (err) {	\
-						DBGS("AGGREGATE_FLATTEN_STRUCT:fixup_set_reserve_address(): err(%d)\n",err);	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER:fixup_set_reserve_address(): err(%d)\n",err);	\
 						KFLAT_ACCESSOR->errno = err;	\
 					}	\
 					else {	\
 						err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
 								post_f(flatten_struct_##T(KFLAT_ACCESSOR,_fp),(const struct T*)ATTR(f)));	\
 						if ((err) && (err!=EEXIST)) {	\
-							DBGS("AGGREGATE_FLATTEN_STRUCT:fixup_set_insert(): err(%d)\n",err);	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER:fixup_set_insert(): err(%d)\n",err);	\
 							KFLAT_ACCESSOR->errno = err;	\
 						}	\
 					}	\
@@ -1539,7 +2248,7 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 						int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
 							make_flatten_pointer(__struct_node,(uintptr_t)_fp-__struct_node->start));	\
 						if ((err) && (err!=EEXIST)) {	\
-							DBGS("FLATTEN_STRUCT:fixup_set_insert(): err(%d)\n",err);	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER:fixup_set_insert(): err(%d)\n",err);	\
 							KFLAT_ACCESSOR->errno = err;	\
 						}	\
 					}	\
@@ -1649,7 +2358,7 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
 					int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
 						make_flatten_pointer(__struct_node,(uintptr_t)_fp-__struct_node->start));	\
 					if ((err) && (err!=EEXIST)) {	\
-						DBGS("AGGREGATE_FLATTEN_STRUCT_ITER:fixup_set_insert(): err(%d)\n",err);	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_ITER:fixup_set_insert(): err(%d)\n",err);	\
 						KFLAT_ACCESSOR->errno = err;	\
 					}	\
 				}	\
@@ -1922,6 +2631,586 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
  * AGGREGATE_FLATTEN_STRUCT_TYPE_STORAGE_MIXED_POINTER_ARRAY_ITER
  */
 
+#define AGGREGATE_FLATTEN_STRUCT_SELF_CONTAINED(T,N,f,_off)	\
+	do {	\
+		DBGTNF(AGGREGATE_FLATTEN_STRUCT,T,N,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off);	\
+    	if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {	\
+    		struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+    				(uint64_t)_ptr+_off+sizeof(struct T*)-1);    \
+    		if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)OFFATTR(void*,_off));	\
+				if (!__inode) {	\
+					int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)OFFATTR(void*,_off));	\
+					if (err) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_SELF_CONTAINED:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+								flatten_struct_##T(KFLAT_ACCESSOR,(const struct T*)OFFATTR(void*,_off)));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)OFFATTR(void*,_off),\
+							(uintptr_t)OFFATTR(void*,_off)+N-1);    \
+					if (__struct_node==0) {	\
+						KFLAT_ACCESSOR->errno = EFAULT;	\
+					}	\
+					else {	\
+						int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+							make_flatten_pointer(__struct_node,(uintptr_t)OFFATTR(void*,_off)-__struct_node->start));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_TYPE_SELF_CONTAINED(T,N,f,_off)	\
+	do {	\
+		DBGTNF(AGGREGATE_FLATTEN_STRUCT_TYPE,T,N,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off);	\
+    	if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {	\
+    		struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+    				(uint64_t)_ptr+_off+sizeof(T*)-1);    \
+    		if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)OFFATTR(void*,_off));	\
+				if (!__inode) {	\
+					int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)OFFATTR(void*,_off));	\
+					if (err) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_SELF_CONTAINED:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+								flatten_struct_type_##T(KFLAT_ACCESSOR,(const T*)OFFATTR(void*,_off)));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)OFFATTR(void*,_off),\
+							(uintptr_t)OFFATTR(void*,_off)+N-1);    \
+					if (__struct_node==0) {	\
+						KFLAT_ACCESSOR->errno = EFAULT;	\
+					}	\
+					else {	\
+						int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+							make_flatten_pointer(__struct_node,(uintptr_t)OFFATTR(void*,_off)-__struct_node->start));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_ITER_SELF_CONTAINED(T,N,f,_off)	\
+	do {    \
+        DBGTNF(AGGREGATE_FLATTEN_STRUCT_ITER,T,N,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off);    \
+        if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {  \
+        	struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+        			(uint64_t)_ptr+_off+sizeof(struct T*)-1);    \
+			if (__node==0) {	\
+				DBGS("AGGREGATE_FLATTEN_STRUCT_ITER_SELF_CONTAINED: (__node==%d)\n",0);	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)OFFATTR(void*,_off));	\
+				struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)OFFATTR(void*,_off),\
+						(uintptr_t)OFFATTR(void*,_off)+N-1);    \
+				if ((!__inode)||(__struct_node==0)) {	\
+					int err = 0;	\
+					if (!__inode) {	\
+						err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)OFFATTR(void*,_off));	\
+					}	\
+					if (err) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_ITER_SELF_CONTAINED:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						struct flatten_job __job;   \
+						int err;	\
+						__job.node = __node;    \
+						__job.offset = (uint64_t)_ptr-__node->start+_off; \
+						__job.size = 1;	\
+						__job.ptr = (struct flatten_base*)OFFATTR(void*,_off);    \
+						__job.fun = (flatten_struct_t)&flatten_struct_##T##_array_iter;    \
+						__job.fp = 0;   \
+						__job.convert = 0;  \
+						err = bqueue_push_back(__q,&__job,sizeof(struct flatten_job));    \
+						if (err) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_ITER_SELF_CONTAINED: bqueue_push_back(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						make_flatten_pointer(__struct_node,(uintptr_t)OFFATTR(void*,_off)-__struct_node->start));	\
+					if ((err) && (err!=EEXIST)) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_ITER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+        }   \
+    } while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_TYPE_ITER_SELF_CONTAINED(T,N,f,_off)	\
+	do {    \
+        DBGTNF(AGGREGATE_FLATTEN_STRUCT_TYPE_ITER,T,N,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off);    \
+        if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {  \
+        	struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+        			(uint64_t)_ptr+_off+sizeof(T*)-1);    \
+			if (__node==0) {	\
+				DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_ITER_SELF_CONTAINED: (__node==%d)\n",0);	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)OFFATTR(void*,_off));	\
+				struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)OFFATTR(void*,_off),\
+						(uintptr_t)OFFATTR(void*,_off)+N-1);    \
+				if ((!__inode)||(__struct_node==0)) {	\
+					int err = 0;	\
+					if (!__inode) {	\
+						err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)OFFATTR(void*,_off));	\
+					}	\
+					if (err) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_ITER_SELF_CONTAINED:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						struct flatten_job __job;   \
+						int err;	\
+						__job.node = __node;    \
+						__job.offset = (uint64_t)_ptr-__node->start+_off; \
+						__job.size = 1;	\
+						__job.ptr = (struct flatten_base*)OFFATTR(void*,_off);    \
+						__job.fun = (flatten_struct_t)&flatten_struct_type_##T##_array_iter;    \
+						__job.fp = 0;   \
+						__job.convert = 0;  \
+						err = bqueue_push_back(__q,&__job,sizeof(struct flatten_job));    \
+						if (err) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_ITER_SELF_CONTAINED: bqueue_push_back(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						make_flatten_pointer(__struct_node,(uintptr_t)OFFATTR(void*,_off)-__struct_node->start));	\
+					if ((err) && (err!=EEXIST)) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_ITER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+        }   \
+    } while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_SELF_CONTAINED(T,N,f,_off,pre_f,post_f)	\
+	do {	\
+		/* Beware here, pre_f() and post_f() should return 0 when NULL arguments passed */	\
+		const struct T* _fp;	\
+		DBGTNFOMF(AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER,T,N,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off,pre_f,post_f);	\
+		_fp = pre_f((const struct T*)OFFATTR(void*,_off));	\
+    	if (_fp&&(!KFLAT_ACCESSOR->errno)) {	\
+			struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+					(uint64_t)_ptr+_off+sizeof(struct T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)_fp);	\
+				if (!__inode) {	\
+					int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)_fp);	\
+					if (err) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_SELF_CONTAINED:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+								post_f(flatten_struct_##T(KFLAT_ACCESSOR,_fp),(const struct T*)OFFATTR(void*,_off)));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)_fp,\
+							(uintptr_t)_fp+N-1);    \
+					if (__struct_node==0) {	\
+						KFLAT_ACCESSOR->errno = EFAULT;	\
+					}	\
+					else {	\
+						int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+							make_flatten_pointer(__struct_node,(uintptr_t)_fp-__struct_node->start));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER_SELF_CONTAINED(T,N,f,_off,pre_f,post_f)	\
+	do {	\
+		/* Beware here, pre_f() and post_f() should return 0 when NULL arguments passed */	\
+		const struct T* _fp;	\
+		DBGTNFOMF(AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER,T,N,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off,pre_f,post_f);	\
+		_fp = pre_f((const T*)OFFATTR(void*,_off));	\
+		if (_fp&&(!KFLAT_ACCESSOR->errno)) {	\
+			struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+					(uint64_t)_ptr+_off+sizeof(T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)_fp);	\
+				if (!__inode) {	\
+					int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)_fp);	\
+					if (err) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER_SELF_CONTAINED:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+								post_f(flatten_struct_type_##T(KFLAT_ACCESSOR,_fp),(const T*)OFFATTR(void*,_off)));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)_fp,\
+							(uintptr_t)_fp+N-1);    \
+					if (__struct_node==0) {	\
+						KFLAT_ACCESSOR->errno = EFAULT;	\
+					}	\
+					else {	\
+						int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+							make_flatten_pointer(__struct_node,(uintptr_t)_fp-__struct_node->start));	\
+						if ((err) && (err!=EEXIST)) {	\
+							DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_ITER_SELF_CONTAINED(T,N,f,_off,pre_f,post_f)	\
+	do {    \
+		const struct T* _fp;	\
+		DBGTNFOMF(AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_ITER,T,N,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off,pf,ff);  \
+		_fp = pre_f((const struct T*)OFFATTR(void*,_off)); \
+        if (_fp&&(!KFLAT_ACCESSOR->errno)) {  \
+        	struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+        			(uint64_t)_ptr+_off+sizeof(struct T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)_fp);	\
+				struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)_fp,\
+						(uintptr_t)_fp+N-1);    \
+				if ((!__inode)||(__struct_node==0)) {	\
+					int err = 0;	\
+					if (!__inode) {	\
+						err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)_fp);	\
+					}	\
+					if (err) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_ITER_SELF_CONTAINED:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						struct flatten_job __job;   \
+						int err;	\
+						__job.node = __node;    \
+						__job.offset = (uint64_t)_ptr-__node->start+_off; \
+						__job.size = 1;	\
+						__job.ptr = (struct flatten_base*)_fp;    \
+						__job.fun = (flatten_struct_t)&flatten_struct_##T##_array_iter;    \
+						__job.fp = (const struct flatten_base*)_fp; \
+						__job.convert = (flatten_struct_mixed_convert_t)&post_f; \
+						err = bqueue_push_back(__q,&__job,sizeof(struct flatten_job));    \
+						if (err) {	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						make_flatten_pointer(__struct_node,(uintptr_t)_fp-__struct_node->start));	\
+					if ((err) && (err!=EEXIST)) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_MIXED_POINTER_ITER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+        }   \
+    } while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER_ITER_SELF_CONTAINED(T,N,f,_off,pre_f,post_f)	\
+	do {    \
+		const struct T* _fp;	\
+		DBGTNFOMF(AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER_ITER,T,N,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off,pf,ff);  \
+		_fp = pre_f((const T*)OFFATTR(void*,_off)); \
+        if (_fp&&(!KFLAT_ACCESSOR->errno)) {  \
+        	struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+        			(uint64_t)_ptr+_off+sizeof(T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				struct fixup_set_node* __inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)_fp);	\
+				struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uintptr_t)_fp,\
+						(uintptr_t)_fp+N-1);    \
+				if ((!__inode)||(__struct_node==0)) {	\
+					int err = 0;	\
+					if (!__inode) {	\
+						err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uintptr_t)_fp);	\
+					}	\
+					if (err) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER_ITER_SELF_CONTAINED:fixup_set_reserve_address(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+					else {	\
+						struct flatten_job __job;   \
+						int err;	\
+						__job.node = __node;    \
+						__job.offset = (uint64_t)_ptr-__node->start+_off; \
+						__job.size = 1;	\
+						__job.ptr = (struct flatten_base*)_fp;    \
+						__job.fun = (flatten_struct_t)&flatten_struct_type_##T##_array_iter;    \
+						__job.fp = (const struct flatten_base*)_fp; \
+						__job.convert = (flatten_struct_mixed_convert_t)&post_f; \
+						err = bqueue_push_back(__q,&__job,sizeof(struct flatten_job));    \
+						if (err) {	\
+							KFLAT_ACCESSOR->errno = err;	\
+						}	\
+					}	\
+				}	\
+				else {	\
+					int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						make_flatten_pointer(__struct_node,(uintptr_t)_fp-__struct_node->start));	\
+					if ((err) && (err!=EEXIST)) {	\
+						DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_MIXED_POINTER_ITER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+        }   \
+	} while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_ARRAY_SELF_CONTAINED(T,N,f,_off,n)	\
+	do {	\
+		DBGM5(AGGREGATE_FLATTEN_STRUCT_ARRAY,T,N,f,_off,n);	\
+    	if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {	\
+    		struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+    				(uint64_t)_ptr+_off+sizeof(struct T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						flatten_plain_type(KFLAT_ACCESSOR,OFFATTR(void*,_off),(n)*N));	\
+				if ((err) && (err!=EEXIST)) {	\
+					DBGS("AGGREGATE_FLATTEN_STRUCT_ARRAY_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+				else {	\
+					struct fixup_set_node* __struct_inode;	\
+					size_t _i;	\
+					for (_i=0; _i<(n); ++_i) {	\
+						struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root,	\
+							(uint64_t)((void*)OFFATTR(void*,_off)+_i*N),(uint64_t)((void*)OFFATTR(void*,_off)+(_i+1)*N-1));    \
+						if (__struct_node==0) {	\
+							err = EFAULT;	\
+							break;	\
+						}	\
+						__struct_inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)((void*)OFFATTR(void*,_off)+_i*N));	\
+						if (!__struct_inode) {	\
+							void* _fp;	\
+							int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uint64_t)((void*)OFFATTR(void*,_off)+_i*N));	\
+							if (err) break;	\
+							_fp = (void*)flatten_struct_##T(KFLAT_ACCESSOR,(void*)OFFATTR(void*,_off)+_i*N);	\
+							libflat_free(_fp);	\
+						}	\
+					}	\
+				}	\
+				if ((err) && (err!=EEXIST)) {	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_TYPE_ARRAY_SELF_CONTAINED(T,N,f,_off,n)	\
+	do {	\
+		DBGM5(AGGREGATE_FLATTEN_STRUCT_TYPE_ARRAY,T,N,f,_off,n);	\
+    	if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {	\
+    		struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+    				(uint64_t)_ptr+_off+sizeof(T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						flatten_plain_type(KFLAT_ACCESSOR,OFFATTR(void*,_off),(n)*N));	\
+				if ((err) && (err!=EEXIST)) {	\
+					DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_ARRAY_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+				else {	\
+					struct fixup_set_node* __struct_inode;	\
+					size_t _i;	\
+					for (_i=0; _i<(n); ++_i) {	\
+						struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root,	\
+							(uint64_t)((void*)OFFATTR(void*,_off)+_i*N),(uint64_t)((void*)OFFATTR(void*,_off)+(_i+1)*N-1));    \
+						if (__struct_node==0) {	\
+							err = EFAULT;	\
+							break;	\
+						}	\
+						__struct_inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)((void*)OFFATTR(void*,_off)+_i*N));	\
+						if (!__struct_inode) {	\
+							void* _fp;	\
+							int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uint64_t)((void*)OFFATTR(void*,_off)+_i*N));	\
+							if (err) break;	\
+							_fp = (void*)flatten_struct_type_##T(KFLAT_ACCESSOR,(void*)OFFATTR(void*,_off)+_i*N);	\
+							libflat_free(_fp);	\
+						}	\
+					}	\
+				}	\
+				if ((err) && (err!=EEXIST)) {	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_ARRAY_ITER_SELF_CONTAINED(T,N,f,_off,n)	\
+	do {	\
+		DBGM5(AGGREGATE_FLATTEN_STRUCT_ARRAY_ITER,T,N,f,_off,n);	\
+    	if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {	\
+    		struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+    				(uint64_t)_ptr+_off+sizeof(struct T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						flatten_plain_type(KFLAT_ACCESSOR,OFFATTR(void*,_off),(n)*N));	\
+				if ((err) && (err!=EEXIST)) {	\
+					DBGS("AGGREGATE_FLATTEN_STRUCT_ARRAY_ITER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+				else {	\
+					struct fixup_set_node* __struct_inode;	\
+					size_t _i;	\
+					for (_i=0; _i<(n); ++_i) {	\
+						struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root,	\
+							(uint64_t)((void*)OFFATTR(void*,_off)+_i*N),(uint64_t)((void*)OFFATTR(void*,_off)+(_i+1)*N-1));    \
+						if (__struct_node==0) {	\
+							err = EFAULT;	\
+							break;	\
+						}	\
+						__struct_inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)((void*)OFFATTR(void*,_off)+_i*N));	\
+						if (!__struct_inode) {	\
+							struct flatten_job __job;   \
+							int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uint64_t)((void*)OFFATTR(void*,_off)+_i*N));	\
+							if (err) break;	\
+							__job.node = 0;    \
+							__job.offset = 0; \
+							__job.size = 1;	\
+							__job.ptr = (struct flatten_base*)((void*)OFFATTR(void*,_off)+_i*N);    \
+							__job.fun = (flatten_struct_t)&flatten_struct_##T##_array_iter;    \
+							__job.fp = 0;   \
+							__job.convert = 0;  \
+							err = bqueue_push_back(__q,&__job,sizeof(struct flatten_job));    \
+							if (err) break;	\
+						}	\
+					}	\
+					if (err) {	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
+#define AGGREGATE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED(T,N,f,_off,n)	\
+	do {	\
+		DBGM5(AGGREGATE_FLATTEN_STRUCT_TYPE_ARRAY_ITER,T,N,f,_off,n);	\
+    	if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {	\
+    		struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+    				(uint64_t)_ptr+_off+sizeof(T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						flatten_plain_type(KFLAT_ACCESSOR,OFFATTR(void*,_off),(n)*N));	\
+				if ((err) && (err!=EEXIST)) {	\
+					DBGS("AGGREGATE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED:fixup_set_insert(): err(%d)\n",err);	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+				else {	\
+					struct fixup_set_node* __struct_inode;	\
+					size_t _i;	\
+					for (_i=0; _i<(n); ++_i) {	\
+						struct flat_node *__struct_node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root,	\
+							(uint64_t)((void*)OFFATTR(void*,_off)+_i*N),(uint64_t)((void*)OFFATTR(void*,_off)+(_i+1)*N-1));    \
+						if (__struct_node==0) {	\
+							err = EFAULT;	\
+							break;	\
+						}	\
+						__struct_inode = fixup_set_search(KFLAT_ACCESSOR,(uint64_t)((void*)OFFATTR(void*,_off)+_i*N));	\
+						if (!__struct_inode) {	\
+							struct flatten_job __job;   \
+							int err = fixup_set_reserve_address(KFLAT_ACCESSOR,(uint64_t)((void*)OFFATTR(void*,_off)+_i*N));	\
+							if (err) break;	\
+							__job.node = 0;    \
+							__job.offset = 0; \
+							__job.size = 1;	\
+							__job.ptr = (struct flatten_base*)((void*)OFFATTR(void*,_off)+_i*N);    \
+							__job.fun = (flatten_struct_t)&flatten_struct_type_##T##_array_iter;    \
+							__job.fp = 0;   \
+							__job.convert = 0;  \
+							err = bqueue_push_back(__q,&__job,sizeof(struct flatten_job));    \
+							if (err) break;	\
+						}	\
+					}	\
+					if (err) {	\
+						KFLAT_ACCESSOR->errno = err;	\
+					}	\
+				}	\
+			}	\
+		}	\
+	} while(0)
+
 #define FLATTEN_TYPE(T,p)	\
 	do {	\
 		DBGM2(FLATTEN_TYPE,T,p);	\
@@ -2035,45 +3324,105 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER(FLTYPE)
         }   \
 	} while (0)
 
-#define REGISTER_FLATTEN_STRUCT(T) \
+#define AGGREGATE_FLATTEN_TYPE_SELF_CONTAINED(T,N,f,_off)	\
+	do {  \
+		DBGM4(AGGREGATE_FLATTEN_TYPE,T,N,f,_off);	\
+        if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {   \
+        	struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+        			(uint64_t)_ptr+_off+sizeof(T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						flatten_plain_type(KFLAT_ACCESSOR,OFFATTR(void*,_off),(N)));	\
+				if ((err) && (err!=EEXIST)) {	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+			}	\
+        }   \
+    } while(0)
+
+#define AGGREGATE_FLATTEN_TYPE_ARRAY_SELF_CONTAINED(T,N,f,_off,n)	\
+	do {  \
+		DBGM5(AGGREGATE_FLATTEN_TYPE_ARRAY,T,N,f,_off,n);	\
+        if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {   \
+        	struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+					(uint64_t)_ptr+_off+sizeof(T*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						flatten_plain_type(KFLAT_ACCESSOR,OFFATTR(void*,_off),(n)*(N)));	\
+				if ((err) && (err!=EEXIST)) {	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+			}	\
+        }   \
+    } while(0)
+
+#define AGGREGATE_FLATTEN_STRING_SELF_CONTAINED(f,_off)	\
+	do {  \
+		DBGOF(AGGREGATE_FLATTEN_STRING,f,"%lx:%zu",(unsigned long)OFFATTR(const char*,_off),(size_t)_off);	\
+        if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {   \
+			struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+					(uint64_t)_ptr+_off+sizeof(char*)-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				int err = fixup_set_insert(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						flatten_plain_type(KFLAT_ACCESSOR,OFFATTR(const char*,_off),strmemlen(OFFATTR(const char*,_off))));	\
+				if ((err) && (err!=EEXIST)) {	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+			}	\
+        }   \
+    } while(0)
+
+#define AGGREGATE_FLATTEN_FUNCTION_POINTER_SELF_CONTAINED(f,_off)	\
 	do {	\
-		recipe_insert(STR(S_##T),(flatten_struct_f)flatten_struct_##T);	\
-	} while(0)
+		DBGOF(AGGREGATE_FLATTEN_FUNCTION_POINTER,f,"%lx:%zu",(unsigned long)OFFATTR(void*,_off),(size_t)_off);	\
+        if (OFFATTR(void*,_off)&&(!KFLAT_ACCESSOR->errno)) {   \
+			struct flat_node *__node = interval_tree_iter_first(&KFLAT_ACCESSOR->FLCTRL.imap_root, (uint64_t)_ptr+_off,\
+					(uint64_t)_ptr+_off+sizeof(int (*)(void))-1);    \
+			if (__node==0) {	\
+				KFLAT_ACCESSOR->errno = EFAULT;	\
+			}	\
+			else {	\
+				int err = fixup_set_insert_fptr(KFLAT_ACCESSOR,__node,(uint64_t)_ptr-__node->start+_off,	\
+						(unsigned long)OFFATTR(void*,_off));	\
+				if ((err) && (err!=EEXIST)) {	\
+					KFLAT_ACCESSOR->errno = err;	\
+				}	\
+			}	\
+        }   \
+	} while (0)
+
+#define REGISTER_FLATTEN_STRUCT(T) \
+	recipe_insert(STR(S_##T),(flatten_struct_f)flatten_struct_##T);
 
 #define UNREGISTER_FLATTEN_STRUCT(T) \
-	do {	\
-		recipe_delete(STR(S_##T));	\
-	} while(0)
+	recipe_delete(STR(S_##T));
 
 #define REGISTER_FLATTEN_STRUCT_TYPE(T) \
-	do {	\
-		recipe_insert(STR(ST_##T),(flatten_struct_f)flatten_struct_type_##T);	\
-	} while(0)
+	recipe_insert(STR(ST_##T),(flatten_struct_f)flatten_struct_type_##T);
 
 #define UNREGISTER_FLATTEN_STRUCT_TYPE(T) \
-	do {	\
-		recipe_delete(STR(ST_##T));	\
-	} while(0)
+	recipe_delete(STR(ST_##T));
 
 #define REGISTER_FLATTEN_STRUCT_ITER(T) \
-	do {	\
-		recipe_iter_insert(STR(S_I_##T),(flatten_struct_iter_f)flatten_struct_##T##_iter);	\
-	} while(0)
+	recipe_iter_insert(STR(S_I_##T),(flatten_struct_iter_f)flatten_struct_##T##_iter);
 
 #define UNREGISTER_FLATTEN_STRUCT_ITER(T) \
-	do {	\
-		recipe_delete(STR(S_I_##T));	\
-	} while(0)
+	recipe_delete(STR(S_I_##T));
 
 #define REGISTER_FLATTEN_STRUCT_TYPE_ITER(T) \
-	do {	\
-		recipe_iter_insert(STR(ST_I_##T),(flatten_struct_iter_f)flatten_struct_type_##T##_iter);	\
-	} while(0)
+	recipe_iter_insert(STR(ST_I_##T),(flatten_struct_iter_f)flatten_struct_type_##T##_iter);
 
 #define UNREGISTER_FLATTEN_STRUCT_TYPE_ITER(T) \
-	do {	\
-		recipe_delete(STR(ST_I_##T));	\
-	} while(0)
+	recipe_delete(STR(ST_I_##T));
 
 #define FOR_POINTER(PTRTYPE,v,p,...)	\
 	do {	\
