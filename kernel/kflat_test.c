@@ -18,6 +18,7 @@
 #include <linux/kflat.h>
 #include <linux/interval_tree_generic.h>
 #include <linux/random.h>
+#include <linux/stop_machine.h>
 #include <linux/kflat.h>
 
 #define START(node) ((node)->start)
@@ -133,7 +134,7 @@ FUNCTION_DEFINE_FLATTEN_STRUCT(A,
 static int kflat_simple_test(struct kflat *kflat, int debug_flag) {
 
 	struct B b = { "ABC" };
-	struct A a = { 0x0000404F, &b };
+	struct A a = { 0x0000404F, &b/*0xffffdddddddddddd*/ };
 	struct A* pA = &a;
 	int err = 0;
 
@@ -577,6 +578,67 @@ static int kflat_pointer_test(struct kflat *kflat, int debug_flag) {
 
 }
 
+int iarr[10] = {0,1,2,3,4,5,6,7,8,9};
+struct iptr {
+	long l;
+	int* p;
+	struct iptr** pp;
+};
+
+#ifndef SELF_CONTAINED
+
+FUNCTION_DECLARE_FLATTEN_STRUCT_ARRAY_ITER_SELF_CONTAINED(iptr,24);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_ITER_SELF_CONTAINED(iptr,24,
+    AGGREGATE_FLATTEN_TYPE_ARRAY_SELF_CONTAINED(int,p,8,OFFATTR(long,0));
+	FOR_POINTER(struct iptr*,__iptr_1,/*ATTR(pp)*/ OFFATTR(void**,16), /* not SAFE */
+	  FLATTEN_STRUCT_ARRAY_ITER(iptr,__iptr_1,1);  /* not SAFE */
+	);
+);
+
+#else
+
+FUNCTION_DECLARE_FLATTEN_STRUCT_ITER(iptr);
+
+FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(iptr,
+    AGGREGATE_FLATTEN_TYPE_ARRAY(int,p,ATTR(l));
+	FOR_POINTER(struct iptr*,__iptr_1,ATTR(pp) /*OFFATTR(void**,2048)*/, /* not SAFE */
+	  FLATTEN_STRUCT_ARRAY_ITER(iptr,__iptr_1,1);  /* not SAFE */
+	);
+);
+
+#endif
+
+static int kflat_record_pointer_test(struct kflat *kflat, int debug_flag) {
+
+	struct iptr pv = {0,0,0};
+	struct iptr* ppv = &pv;
+	struct iptr pv2 = {10,iarr,&ppv};
+	int err = 0;
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	flat_infos("offsetof(struct iptr,l): %zu\n",offsetof(struct iptr,l));
+	flat_infos("offsetof(struct iptr,p): %zu\n",offsetof(struct iptr,p));
+	flat_infos("offsetof(struct iptr,pp): %zu\n",offsetof(struct iptr,pp));
+
+	UNDER_ITER_HARNESS(
+		FOR_ROOT_POINTER(&pv2,
+			FLATTEN_STRUCT_ARRAY_ITER(iptr,&pv2,1);
+		);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
 FUNCTION_DECLARE_FLATTEN_STRUCT_ITER(task_struct);
 
 FUNCTION_DEFINE_FLATTEN_STRUCT_ITER(task_struct,
@@ -600,6 +662,7 @@ FUNCTION_DEFINE_FLATTEN_STRUCT(task_struct,
 );
 
 void print_struct_task_offsets(struct task_struct* t) {
+	flat_infos("task_struct.PID: %d\n",t->pid);
 	flat_infos("task_struct.last_wakee: %zu\n",offsetof(struct task_struct,last_wakee));
 	flat_infos("task_struct.real_parent: %zu\n",offsetof(struct task_struct,real_parent));
 	flat_infos("task_struct.parent: %zu\n",offsetof(struct task_struct,parent));
@@ -665,6 +728,12 @@ static int kflat_currenttask_test_iter(struct kflat *kflat, int debug_flag) {
 
 }
 
+FUNCTION_DEFINE_FLATTEN_UNINTERRUPTIBLE(currenttask_module,
+	UNDER_ITER_HARNESS(
+		FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER(task_struct,__root_ptr);
+	);
+)
+
 static int kflat_currenttask_module_test(struct kflat *kflat, int debug_flag) {
 
 	int err = 0;
@@ -677,9 +746,7 @@ static int kflat_currenttask_module_test(struct kflat *kflat, int debug_flag) {
 	print_struct_task_offsets(t);
 
 	FOR_ROOT_POINTER(t,
-		UNDER_ITER_HARNESS(
-			FLATTEN_STRUCT_DYNAMIC_RECIPE_ITER(task_struct, t);
-		);
+		FLATTEN_UNINTERRUPTIBLE(currenttask_module,kflat,t);
 	);
 
 	flat_infos("@Flatten done: %d\n",kflat->errno);
@@ -1051,6 +1118,7 @@ enum KFLAT_TEST_CASE {
 	CURRENTTASKM=10<<2,
 	STRUCTARRAY=11<<2,
 	CIRCLEM=12<<2,
+	RPOINTER=13<<2,
 };
 
 #include "kflat_test_data.h"
@@ -1098,6 +1166,11 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 
 	if ((arg&(~0x3))==POINTER) { /* Always recursive */
 		err = kflat_pointer_test(kflat,arg&0x01);
+		if (err) return err;
+	}
+
+	if ((arg&(~0x3))==RPOINTER) { /* Always recursive */
+		err = kflat_record_pointer_test(kflat,arg&0x01);
 		if (err) return err;
 	}
 

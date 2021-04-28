@@ -18,6 +18,7 @@
 #include <linux/uaccess.h>		/* faulthandler_disabled()	*/
 #include <linux/efi.h>			/* efi_recover_from_page_fault()*/
 #include <linux/mm_types.h>
+#include <linux/kflat.h>
 
 #include <asm/cpufeature.h>		/* boot_cpu_has, ...		*/
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -1249,6 +1250,14 @@ static void
 do_kern_addr_fault(struct pt_regs *regs, unsigned long hw_error_code,
 		   unsigned long address)
 {
+	/* Check if kflat is working (and we just tried to serialize invalid pointer) */
+	if (kflat_in_progress(get_current()->kflat)) {
+		flat_infos("Kernel address fault on 0x%lx during flattening stage\n",address);
+		WRITE_ONCE(get_current()->kflat->errno,EFAULT);
+		regs->ip = get_current()->kflat->retv;
+		return;
+	}
+
 	/*
 	 * Protection keys exceptions only happen on user pages.  We
 	 * have no user pages in the kernel portion of the address

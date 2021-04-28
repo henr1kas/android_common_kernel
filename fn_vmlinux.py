@@ -42,11 +42,11 @@ with open(imgpath, "rb") as f:
 							fptrMap[addr+kernel_load_addr] = "%s::%s"%(kfn,fsym)
 						break
 				else:
-					print("Couldn't match symbol at vmlinux address 0x%lx: %s\n",vp,str(fsL))
+					print("Couldn't match symbol at vmlinux address 0x%lx: %s\n"%(vp,str(fsL)))
 			else:
-				print("Couldn't match symbol at vmlinux address 0x%lx: [%s]\n",vp,s)
+				print("Couldn't match symbol at vmlinux address 0x%lx: [%s]\n"%(vp,s))
 		except Exception as e:
-			print("Couldn't find symbol at vmlinux address: 0x%lx\n",vp)
+			print("Couldn't find symbol at vmlinux address: 0x%lx\n"%(vp))
 			print(e)
 			print("Skipping...")
 print("# Summary:")

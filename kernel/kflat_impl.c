@@ -153,14 +153,14 @@ INTERVAL_TREE_DEFINE(struct flat_node, rb,
 		     uintptr_t, __subtree_last,
 		     START, LAST,static,interval_tree)
 
-static struct blstream* create_binary_stream_element(size_t size) {
+static struct blstream* create_binary_stream_element(struct kflat* kflat, size_t size) {
 	struct blstream* n;
 	void* m;
-	n = libflat_zalloc(sizeof(struct blstream),1);
+	n = kflat_zalloc(kflat,sizeof(struct blstream),1);
 	if (n==0) return 0;
-	m = libflat_zalloc(size,1);
+	m = kflat_zalloc(kflat,size,1);
 	if (m==0) {
-		libflat_free(n);
+		kflat_free(n);
 		return 0;
 	}
 	n->data = m;
@@ -169,7 +169,7 @@ static struct blstream* create_binary_stream_element(size_t size) {
 }
 
 struct blstream* binary_stream_append(struct kflat* kflat, const void* data, size_t size) {
-	struct blstream* v = create_binary_stream_element(size);
+	struct blstream* v = create_binary_stream_element(kflat,size);
 	if (v==0) return 0;
 	memcpy(v->data,data,size);
     if (!kflat->FLCTRL.bhead) {
@@ -187,7 +187,7 @@ EXPORT_SYMBOL(binary_stream_append);
 
 
 struct blstream* binary_stream_append_reserve(struct kflat* kflat, size_t size) {
-	struct blstream* v = libflat_zalloc(sizeof(struct blstream),1);
+	struct blstream* v = kflat_zalloc(kflat,sizeof(struct blstream),1);
 	if (v==0) return 0;
 	v->data = 0;
 	v->size = size;
@@ -203,8 +203,8 @@ struct blstream* binary_stream_append_reserve(struct kflat* kflat, size_t size) 
     return v;
 }
 
-struct blstream* binary_stream_update(const void* data, size_t size, struct blstream* where) {
-	void* m = libflat_zalloc(size,1);
+struct blstream* binary_stream_update(struct kflat* kflat, const void* data, size_t size, struct blstream* where) {
+	void* m = kflat_zalloc(kflat,size,1);
 	if (m==0) return 0;
 	where->data = m;
 	memcpy(where->data,data,size);
@@ -213,7 +213,7 @@ struct blstream* binary_stream_update(const void* data, size_t size, struct blst
 
 
 struct blstream* binary_stream_insert_front(struct kflat* kflat, const void* data, size_t size, struct blstream* where) {
-	struct blstream* v = create_binary_stream_element(size);
+	struct blstream* v = create_binary_stream_element(kflat,size);
 	if (v==0) return 0;
 	memcpy(v->data,data,size);
 	v->next = where;
@@ -230,7 +230,7 @@ struct blstream* binary_stream_insert_front(struct kflat* kflat, const void* dat
 EXPORT_SYMBOL(binary_stream_insert_front);
 
 struct blstream* binary_stream_insert_front_reserve(struct kflat* kflat, size_t size, struct blstream* where) {
-	struct blstream* v = libflat_zalloc(sizeof(struct blstream),1);
+	struct blstream* v = kflat_zalloc(kflat,sizeof(struct blstream),1);
 	if (v==0) return 0;
 	v->data = 0;
 	v->size = size;
@@ -247,7 +247,7 @@ struct blstream* binary_stream_insert_front_reserve(struct kflat* kflat, size_t 
 }
 
 struct blstream* binary_stream_insert_back(struct kflat* kflat, const void* data, size_t size, struct blstream* where) {
-	struct blstream* v = create_binary_stream_element(size);
+	struct blstream* v = create_binary_stream_element(kflat,size);
 	if (v==0) return 0;
 	memcpy(v->data,data,size);
 	v->next = where->next;
@@ -264,7 +264,7 @@ struct blstream* binary_stream_insert_back(struct kflat* kflat, const void* data
 EXPORT_SYMBOL(binary_stream_insert_back);
 
 struct blstream* binary_stream_insert_back_reserve(struct kflat* kflat, size_t size, struct blstream* where) {
-	struct blstream* v = libflat_zalloc(sizeof(struct blstream),1);
+	struct blstream* v = kflat_zalloc(kflat,sizeof(struct blstream),1);
 	if (v==0) return 0;
 	v->data = 0;
 	v->size = size;
@@ -289,7 +289,7 @@ int binary_stream_calculate_index(struct kflat* kflat) {
     	p = p->next;
     	if (cp->alignment) {
     		struct blstream* v;
-    		unsigned char* padding = libflat_zalloc(cp->alignment,1);
+    		unsigned char* padding = kflat_zalloc(kflat,cp->alignment,1);
     		if (!padding) {
     			return ENOMEM;
     		}
@@ -299,7 +299,7 @@ int binary_stream_calculate_index(struct kflat* kflat) {
     		else if (index%cp->alignment) {
     			align=cp->alignment-(index%cp->alignment);
     		}
-    		libflat_free(padding);
+    		kflat_free(padding);
     		v = binary_stream_insert_front(kflat,padding,align,cp);
     		if (v==0) return ENOMEM;
     		v->index = index;
@@ -317,8 +317,8 @@ void binary_stream_destroy(struct kflat* kflat) {
     while(kflat->FLCTRL.btail) {
     	struct blstream* p = kflat->FLCTRL.btail;
     	kflat->FLCTRL.btail = kflat->FLCTRL.btail->next;
-    	libflat_free(p->data);
-    	libflat_free(p);
+    	kflat_free(p->data);
+    	kflat_free(p);
     }
 }
 
@@ -391,11 +391,11 @@ void binary_stream_update_pointers(struct kflat* kflat) {
     }
 }
 
-int bqueue_init(struct bqueue* q, size_t block_size) {
+int bqueue_init(struct kflat* kflat, struct bqueue* q, size_t block_size) {
 
     q->block_size = block_size;
     q->size = 0;
-    q->front_block = libflat_zalloc(block_size+sizeof(struct queue_block*),1);
+    q->front_block = kflat_zalloc(kflat,block_size+sizeof(struct queue_block*),1);
     if (!q->front_block) {
     	return ENOMEM;
     }
@@ -412,7 +412,7 @@ void bqueue_destroy(struct bqueue* q) {
     while(back) {
         struct queue_block* tmp = back;
         back = back->next;
-        libflat_free(tmp);
+        kflat_free(tmp);
     }
 }
 
@@ -427,7 +427,7 @@ size_t bqueue_size(struct bqueue* q) {
 }
 
 
-int bqueue_push_back(struct bqueue* q, const void* m, size_t s) {
+int bqueue_push_back(struct kflat* kflat, struct bqueue* q, const void* m, size_t s) {
 
     size_t copied = 0;
     while(s>0) {
@@ -438,7 +438,7 @@ int bqueue_push_back(struct bqueue* q, const void* m, size_t s) {
         if (s>=avail_size) {
         	struct queue_block* new_block;
             s=s-avail_size;
-            new_block = libflat_zalloc(q->block_size+sizeof(struct queue_block*),1);
+            new_block = kflat_zalloc(kflat,q->block_size+sizeof(struct queue_block*),1);
             if (!new_block) {
             	return ENOMEM;
             }
@@ -473,7 +473,7 @@ int bqueue_pop_front(struct bqueue* q, void* m, size_t s) {
         	s=s-avail_size;
             tmp = q->back_block;
             q->back_block = q->back_block->next;
-            libflat_free(tmp);
+            kflat_free(tmp);
         }
         else s=0;
         q->back_index = (q->back_index+copy_size)%q->block_size;
@@ -485,8 +485,8 @@ int bqueue_pop_front(struct bqueue* q, void* m, size_t s) {
 
 #define ADDR_KEY(p)	((((p)->inode)?((p)->inode->start):0) + (p)->offset)
 
-static struct fixup_set_node* create_fixup_set_node_element(struct flat_node* node, size_t offset, struct flatten_pointer* ptr) {
-	struct fixup_set_node* n = libflat_zalloc(sizeof(struct fixup_set_node),1);
+static struct fixup_set_node* create_fixup_set_node_element(struct kflat* kflat, struct flat_node* node, size_t offset, struct flatten_pointer* ptr) {
+	struct fixup_set_node* n = kflat_zalloc(kflat,sizeof(struct fixup_set_node),1);
 	if (n==0) return 0;
 	n->inode = node;
 	n->offset = offset;
@@ -534,7 +534,7 @@ int fixup_set_reserve_address(struct kflat* kflat, uintptr_t addr) {
 	new = &(kflat->FLCTRL.fixup_set_root.rb_root.rb_node);
 	parent = 0;
 
-	data = create_fixup_set_node_element(0,addr,0);
+	data = create_fixup_set_node_element(kflat,0,addr,0);
 	if (!data) {
 		return ENOMEM;
 	}
@@ -578,7 +578,7 @@ int fixup_set_reserve(struct kflat* kflat, struct flat_node* node, size_t offset
 		return EEXIST;
 	}
 
-	data = create_fixup_set_node_element(node,offset,0);
+	data = create_fixup_set_node_element(kflat,node,offset,0);
 	if (!data) {
 		return ENOMEM;
 	}
@@ -615,7 +615,7 @@ int fixup_set_update(struct kflat* kflat, struct flat_node* node, size_t offset,
 			offset,(uintptr_t)ptr);
 
 	if (node==0) {
-		libflat_free(ptr);
+		kflat_free(ptr);
 		return EINVAL;
 	}
 
@@ -649,23 +649,50 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 			offset,(uintptr_t)ptr);
 
 	if (!ptr) {
+		DBG("fixup_set_insert(...): ptr - EINVAL\n");
 		return EINVAL;
 	}
 
 	if (node==0) {
-		libflat_free(ptr);
+		kflat_free(ptr);
+		DBG("fixup_set_insert(...): node - EINVAL\n");
 		return EINVAL;
 	}
 
 	inode = fixup_set_search(kflat,node->start+offset);
 
 	if (inode && inode->inode) {
-		if ((inode->ptr->node->start+inode->ptr->offset)!=(ptr->node->start+ptr->offset)) {
-			flat_err("Multiple pointer mismatch for the same storage");
-			libflat_free(ptr);
+		//uintptr_t inode_start;
+		//uintptr_t inode_offset;
+		//uintptr_t ptr_start;
+		//uintptr_t ptr_offset;
+		uintptr_t inode_ptr;
+
+		//DBGS("fixup_set_insert(...): inode: 0x%lx, inode->inode: 0x%lx\n",inode,inode->inode);
+		if (((unsigned long)inode->ptr)&1) {
+			inode_ptr = ((unsigned long)inode->ptr)&(~1);
+		}
+		else {
+			inode_ptr = inode->ptr->node->start + inode->ptr->offset;
+		}
+		//inode_start = ((struct flatten_pointer*)(((unsigned long)inode->ptr)&(~1)))->node->start;
+		//DBGS("fixup_set_insert(...): inode_start: 0x%lx\n",inode_start);
+		//inode_offset = inode->ptr->offset;
+		//DBGS("fixup_set_insert(...): inode_offset: 0x%lx\n",inode_offset);
+		//ptr_start = ptr->node->start;
+		//DBGS("fixup_set_insert(...): ptr_start: 0x%lx\n",ptr_start);
+		//ptr_offset = ptr->offset;
+		//DBGS("fixup_set_insert(...): ptr_offset: 0x%lx\n",ptr_offset);
+		if (inode_ptr!=ptr->node->start+ptr->offset) {
+		//if ((inode_start+inode_offset)!=(ptr_start+ptr_offset)) {
+			flat_errs("fixup_set_insert(...): multiple pointer mismatch for the same storage [%d]: (%lx vs %lx)\n",
+					((unsigned long)inode->ptr)&1,inode_ptr,ptr->node->start+ptr->offset);
+			kflat_free(ptr);
+			DBG("fixup_set_insert(...): EFAULT\n");
 			return EFAULT;
 		}
-		libflat_free(ptr);
+		kflat_free(ptr);
+		DBG("fixup_set_insert(...): node - EEXIST\n");
 		return EEXIST;
 	}
 
@@ -673,9 +700,9 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 		return fixup_set_update(kflat,node, offset, ptr);
 	}
 
-	data = create_fixup_set_node_element(node,offset,ptr);
+	data = create_fixup_set_node_element(kflat,node,offset,ptr);
 	if (!data) {
-		libflat_free(ptr);
+		kflat_free(ptr);
 		return ENOMEM;
 	}
 	new = &(kflat->FLCTRL.fixup_set_root.rb_root.rb_node);
@@ -690,17 +717,99 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 			new = &((*new)->rb_left);
 		else if (ADDR_KEY(data) > ADDR_KEY(this))
 			new = &((*new)->rb_right);
-		else
+		else {
+			DBG("fixup_set_insert(...): EEXIST\n");
 			return EEXIST;
+		}
 	}
 
 	/* Add new node and rebalance tree. */
 	rb_link_node(&data->node, parent, new);
 	rb_insert_color(&data->node, &kflat->FLCTRL.fixup_set_root.rb_root);
 
+	DBG("fixup_set_insert(...): 0\n");
 	return 0;
 }
 EXPORT_SYMBOL(fixup_set_insert);
+
+int fixup_set_insert_force_update(struct kflat* kflat, struct flat_node* node, size_t offset, struct flatten_pointer* ptr) {
+
+	struct fixup_set_node* inode;
+	struct fixup_set_node *data;
+	struct rb_node **new, *parent;
+
+	DBGS("fixup_set_insert_force_update(%lx[%lx:%zu],%zu,%lx)\n",(uintptr_t)node,
+			(node)?(node->start):0,(node)?(node->last-node->start+1):0,
+			offset,(uintptr_t)ptr);
+
+	if (!ptr) {
+		DBG("fixup_set_insert_force_update(...): ptr - EINVAL\n");
+		return EINVAL;
+	}
+
+	if (node==0) {
+		kflat_free(ptr);
+		DBG("fixup_set_insert_force_update(...): node - EINVAL\n");
+		return EINVAL;
+	}
+
+	inode = fixup_set_search(kflat,node->start+offset);
+
+	if (inode && inode->inode) {
+		uintptr_t inode_ptr;
+		if (((unsigned long)inode->ptr)&1) {
+			inode_ptr = ((unsigned long)inode->ptr)&(~1);
+		}
+		else {
+			inode_ptr = inode->ptr->node->start + inode->ptr->offset;
+		}
+		if (inode_ptr!=ptr->node->start+ptr->offset) {
+			flat_errs("fixup_set_insert_force_update(...): multiple pointer mismatch for the same storage [%d]: (%lx vs %lx)\n",
+					((unsigned long)inode->ptr)&1,inode_ptr,ptr->node->start+ptr->offset);
+		}
+		else {
+			kflat_free(ptr);
+			DBG("fixup_set_insert_force_update(...): node - EEXIST\n");
+			return EEXIST;
+		}
+	}
+
+	if (inode && !inode->inode) {
+		return fixup_set_update(kflat,node, offset, ptr);
+	}
+
+	data = create_fixup_set_node_element(kflat,node,offset,ptr);
+	if (!data) {
+		kflat_free(ptr);
+		return ENOMEM;
+	}
+	new = &(kflat->FLCTRL.fixup_set_root.rb_root.rb_node);
+	parent = 0;
+
+	/* Figure out where to put new node */
+	while (*new) {
+		struct fixup_set_node *this = container_of(*new, struct fixup_set_node, node);
+
+		parent = *new;
+		if (ADDR_KEY(data) < ADDR_KEY(this))
+			new = &((*new)->rb_left);
+		else if (ADDR_KEY(data) > ADDR_KEY(this))
+			new = &((*new)->rb_right);
+		else {
+			kflat_free((void*)(((uintptr_t)data->ptr)&(~1)));
+			data->ptr = ptr;
+			return EAGAIN;
+		}
+	}
+
+	/* Add new node and rebalance tree. */
+	rb_link_node(&data->node, parent, new);
+	rb_insert_color(&data->node, &kflat->FLCTRL.fixup_set_root.rb_root);
+
+	DBG("fixup_set_insert_force_update(...): 0\n");
+	return 0;
+}
+EXPORT_SYMBOL(fixup_set_insert_force_update);
 
 int fixup_set_insert_fptr(struct kflat* kflat, struct flat_node* node, size_t offset, unsigned long fptr) {
 
@@ -724,7 +833,8 @@ int fixup_set_insert_fptr(struct kflat* kflat, struct flat_node* node, size_t of
 
 	if (inode && inode->inode) {
 		if ((((unsigned long)inode->ptr)&(~1))!=fptr) {
-			flat_err("Multiple pointer mismatch for the same storage");
+			flat_errs("fixup_set_insert_fptr(...): multiple pointer mismatch for the same storage: (%lx vs %lx)\n",
+					(((unsigned long)inode->ptr)&(~1)),fptr);
 			return EFAULT;
 		}
 		return EEXIST;
@@ -734,7 +844,7 @@ int fixup_set_insert_fptr(struct kflat* kflat, struct flat_node* node, size_t of
 		return fixup_set_update(kflat,node, offset, (struct flatten_pointer*)(fptr|1));
 	}
 
-	data = create_fixup_set_node_element(node,offset,(struct flatten_pointer*)(fptr|1));
+	data = create_fixup_set_node_element(kflat,node,offset,(struct flatten_pointer*)(fptr|1));
 	if (!data) {
 		return ENOMEM;
 	}
@@ -761,6 +871,69 @@ int fixup_set_insert_fptr(struct kflat* kflat, struct flat_node* node, size_t of
 	return 0;
 }
 EXPORT_SYMBOL(fixup_set_insert_fptr);
+
+int fixup_set_insert_fptr_force_update(struct kflat* kflat, struct flat_node* node, size_t offset, unsigned long fptr) {
+
+	struct fixup_set_node* inode;
+	struct fixup_set_node *data;
+	struct rb_node **new, *parent;
+
+	DBGS("fixup_set_insert_fptr_force_update(%lx[%lx:%zu],%zu,%lx)\n",(uintptr_t)node,
+			(node)?(node->start):0,(node)?(node->last-node->start+1):0,
+			offset,fptr);
+
+	if (!fptr) {
+		return EINVAL;
+	}
+
+	if (node==0) {
+		return EINVAL;
+	}
+
+	inode = fixup_set_search(kflat,node->start+offset);
+
+	if (inode && inode->inode) {
+		if ((((unsigned long)inode->ptr)&(~1))!=fptr) {
+			flat_errs("fixup_set_insert_fptr_force_update(...): multiple pointer mismatch for the same storage: (%lx vs %lx)\n",
+					(((unsigned long)inode->ptr)&(~1)),fptr);
+		}
+		return EEXIST;
+	}
+
+	if (inode && !inode->inode) {
+		return fixup_set_update(kflat,node, offset, (struct flatten_pointer*)(fptr|1));
+	}
+
+	data = create_fixup_set_node_element(kflat,node,offset,(struct flatten_pointer*)(fptr|1));
+	if (!data) {
+		return ENOMEM;
+	}
+	new = &(kflat->FLCTRL.fixup_set_root.rb_root.rb_node);
+	parent = 0;
+
+	/* Figure out where to put new node */
+	while (*new) {
+		struct fixup_set_node *this = container_of(*new, struct fixup_set_node, node);
+
+		parent = *new;
+		if (ADDR_KEY(data) < ADDR_KEY(this))
+			new = &((*new)->rb_left);
+		else if (ADDR_KEY(data) > ADDR_KEY(this))
+			new = &((*new)->rb_right);
+		else {
+			kflat_free((void*)(((uintptr_t)data->ptr)&(~1)));
+			data->ptr = (struct flatten_pointer*)(fptr|1);
+			return EAGAIN;
+		}
+	}
+
+	/* Add new node and rebalance tree. */
+	rb_link_node(&data->node, parent, new);
+	rb_insert_color(&data->node, &kflat->FLCTRL.fixup_set_root.rb_root);
+
+	return 0;
+}
+EXPORT_SYMBOL(fixup_set_insert_fptr_force_update);
 
 void fixup_set_print(struct kflat* kflat) {
 	struct rb_node * p = rb_first(&kflat->FLCTRL.fixup_set_root.rb_root);
@@ -935,14 +1108,14 @@ void fixup_set_destroy(struct kflat* kflat) {
 		rb_erase(p, &kflat->FLCTRL.fixup_set_root.rb_root);
 		p = rb_next(p);
 		if (!(((unsigned long)node->ptr)&1)) {
-			libflat_free(node->ptr);
+			kflat_free(node->ptr);
 		}
-		libflat_free(node);
+		kflat_free(node);
 	};
 }
 
 int root_addr_append(struct kflat* kflat, uintptr_t root_addr) {
-    struct root_addrnode* v = libflat_zalloc(sizeof(struct root_addrnode),1);
+    struct root_addrnode* v = kflat_zalloc(kflat,sizeof(struct root_addrnode),1);
     if (!v) {
     	return ENOMEM;
     }
@@ -988,7 +1161,7 @@ int interval_tree_destroy(struct kflat* kflat, struct rb_root *root) {
 	while(p) {
 		struct flat_node* node = (struct flat_node*)p;
 		struct interval_nodelist* v;
-		v = libflat_zalloc(sizeof(struct interval_nodelist),1);
+		v = kflat_zalloc(kflat,sizeof(struct interval_nodelist),1);
 		if (!v) {
 			rv = ENOMEM;
 			break;
@@ -1008,64 +1181,11 @@ int interval_tree_destroy(struct kflat* kflat, struct rb_root *root) {
 	while(h) {
     	struct interval_nodelist* p = h;
     	h = h->next;
-    	libflat_free(p->node);
-    	libflat_free(p);
+    	kflat_free(p->node);
+    	kflat_free(p);
     }
 	return rv;
 }
-
-struct flatten_pointer* get_pointer_node(struct kflat* kflat, const void* _ptr) {
-
-	struct flat_node *node;
-	if (_ptr==0) {
-		flat_errs("Invalid pointer address: %zu\n",0);
-		return 0;
-	}
-	node = interval_tree_iter_first(&kflat->FLCTRL.imap_root, (uintptr_t)_ptr, (uintptr_t)_ptr+sizeof(void*)-1);
-	if (node) {
-		uintptr_t p = (uintptr_t)_ptr;
-		if ((node->start>p) || (node->last<p+sizeof(void*)-1)) {
-			flat_errs("Invalid pointer address: %zu\n",p);
-			return 0;
-		}
-		return make_flatten_pointer(node,p-node->start);
-	}
-	else {
-		struct rb_node* rb;
-		struct rb_node* prev;
-		struct blstream* storage;
-		node = libflat_zalloc(sizeof(struct flat_node),1);
-		if (node==0) return 0;
-		node->start = (uintptr_t)_ptr;
-		node->last = (uintptr_t)_ptr + sizeof(void*)-1;
-		interval_tree_insert(node, &kflat->FLCTRL.imap_root);
-		rb = &node->rb;
-		prev = rb_prev(rb);
-		if (prev) {
-			storage = binary_stream_insert_back(kflat,_ptr,sizeof(void*),((struct flat_node*)prev)->storage);
-			if (!storage) {
-				libflat_free(node);
-				return 0;
-			}
-		}
-		else {
-			struct rb_node* next = rb_next(rb);
-			if (next) {
-				storage = binary_stream_insert_front(kflat,_ptr,sizeof(void*),((struct flat_node*)next)->storage);
-			}
-			else {
-				storage = binary_stream_append(kflat,_ptr,sizeof(void*));
-			}
-			if (!storage) {
-				libflat_free(node);
-				return 0;
-			}
-		}
-		node->storage = storage;
-		return make_flatten_pointer(node,0);
-	}
-}
-EXPORT_SYMBOL(get_pointer_node);
 
 struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr, size_t _sz) {
 
@@ -1085,18 +1205,18 @@ struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr
 					flat_err("flat_node missing storage");
 					return 0;
 				}
-				nn = libflat_zalloc(sizeof(struct flat_node),1);
+				nn = kflat_zalloc(kflat,sizeof(struct flat_node),1);
 				if (nn==0) return 0;
 				nn->start = p;
 				nn->last = node->start-1;
 				nn->storage = binary_stream_insert_front(kflat,(void*)p,node->start-p,node->storage);
 				if (!nn->storage) {
-					libflat_free(nn);
+					kflat_free(nn);
 					return 0;
 				}
 				interval_tree_insert(nn, &kflat->FLCTRL.imap_root);
 				if (r==0) {
-					r = make_flatten_pointer(nn,0);
+					r = make_flatten_pointer(kflat,nn,0);
 					if (!r) {
 						return 0;
 					}
@@ -1104,7 +1224,7 @@ struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr
 			}
 			else {
 				if (r==0) {
-					r = make_flatten_pointer(node,p-node->start);
+					r = make_flatten_pointer(kflat,node,p-node->start);
 					if (!r) {
 						return 0;
 					}
@@ -1117,20 +1237,20 @@ struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr
 		if ((uintptr_t)_ptr+_sz>p) {
 			struct flat_node* nn;
 			if (!prev->storage) {
-				libflat_free(r);
+				kflat_free(r);
 				return 0;
 			}
-			nn = libflat_zalloc(sizeof(struct flat_node),1);
+			nn = kflat_zalloc(kflat,sizeof(struct flat_node),1);
 			if (!nn) {
-				libflat_free(r);
+				kflat_free(r);
 				return 0;
 			}
 			nn->start = p;
 			nn->last = (uintptr_t)_ptr+_sz-1;
 			nn->storage = binary_stream_insert_back(kflat,(void*)p,(uintptr_t)_ptr+_sz-p,prev->storage);
 			if (!nn->storage) {
-				libflat_free(nn);
-				libflat_free(r);
+				kflat_free(nn);
+				kflat_free(r);
 				return 0;
 			}
 			interval_tree_insert(nn, &kflat->FLCTRL.imap_root);
@@ -1141,7 +1261,7 @@ struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr
 		struct blstream* storage;
 		struct rb_node* rb;
 		struct rb_node* prev;
-		node = libflat_zalloc(sizeof(struct flat_node),1);
+		node = kflat_zalloc(kflat,sizeof(struct flat_node),1);
 		if (!node) {
 			return 0;
 		}
@@ -1166,7 +1286,7 @@ struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr
 			return 0;
 		}
 		node->storage = storage;
-		r = make_flatten_pointer(node,0);
+		r = make_flatten_pointer(kflat,node,0);
 		if (!r) {
 			return 0;
 		}
@@ -1179,6 +1299,16 @@ void flatten_init(struct kflat* kflat) {
 	memset(&kflat->FLCTRL,0,sizeof(struct FLCONTROL));
 	kflat->FLCTRL.fixup_set_root = RB_ROOT_CACHED;
 	kflat->FLCTRL.imap_root = RB_ROOT_CACHED;
+	kflat->mptr = 0;
+#if LINEAR_MEMORY_ALLOCATOR>0
+	kflat->mpool = kvzalloc(KFLAT_LINEAR_MEMORY_POOL_SIZE,GFP_KERNEL);
+	if (!kflat->mpool) {
+		flat_errs("Failed to allocate initial kflat memory pool of size %zu\n",KFLAT_LINEAR_MEMORY_POOL_SIZE);
+		kflat->errno = ENOMEM;
+	}
+#else
+	kflat->mpool = 0;
+#endif
 }
 
 void flatten_debug_info(struct kflat* kflat) {
@@ -1194,9 +1324,10 @@ int flatten_write(struct kflat* kflat) {
 	int err;
 
 	if ((err=flatten_write_internal(kflat,&written))==0) {
-		flat_infos("OK. Flatten size: %lu, %lu pointers, %lu function pointers, %lu continuous memory fragments, %zu bytes written\n",
+		flat_infos("OK. Flatten size: %lu, %lu pointers, %lu function pointers, %lu continuous memory fragments,"
+				"%zu bytes written, memory used: %zu\n",
 			kflat->FLCTRL.HDR.memory_size,kflat->FLCTRL.HDR.ptr_count,kflat->FLCTRL.HDR.fptr_count,
-			kflat->FLCTRL.HDR.mcount,written-sizeof(size_t));
+			kflat->FLCTRL.HDR.mcount,written-sizeof(size_t),kflat->mptr);
 	}
 	else {
 		flat_errs("ERROR %d: Could not write flatten image. Flatten size: %lu, %lu pointers, %lu function pointers,"
@@ -1267,9 +1398,13 @@ int flatten_fini(struct kflat* kflat) {
     while(kflat->FLCTRL.rtail) {
     	struct root_addrnode* p = kflat->FLCTRL.rtail;
     	kflat->FLCTRL.rtail = kflat->FLCTRL.rtail->next;
-    	libflat_free(p);
+    	kflat_free(p);
     }
     return interval_tree_destroy(kflat,&kflat->FLCTRL.imap_root.rb_root);
+#if LINEAR_MEMORY_ALLOCATOR
+    kvfree(kflat->mpool);
+    kflat->mptr = 0;
+#endif
 }
 
 void flatten_set_debug_flag(struct kflat* kflat, int flag) {
@@ -1283,6 +1418,11 @@ void flatten_set_option(struct kflat* kflat, int option) {
 void flatten_clear_option(struct kflat* kflat, int option) {
 	kflat->FLCTRL.option &= ~option;
 }
+
+int kflat_in_progress(struct kflat* kflat) {
+	return (kflat->FLCTRL.option & KFLAT_OPTION_IN_PROGRESS);
+}
+EXPORT_SYMBOL(kflat_in_progress);
 
 void flatten_debug_memory() {
 #if 0
