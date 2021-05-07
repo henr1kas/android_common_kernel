@@ -536,6 +536,7 @@ do_general_protection(struct pt_regs *regs, long error_code)
 
 	tsk = current;
 	if (!user_mode(regs)) {
+
 		if (fixup_exception(regs, X86_TRAP_GP, error_code, 0))
 			return;
 

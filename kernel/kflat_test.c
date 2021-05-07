@@ -504,6 +504,36 @@ static int kflat_circle_test_iter(struct kflat *kflat, size_t num_points, int de
 
 }
 
+static int kflat_circle_test_arg_iter(struct kflat *kflat, size_t num_points, int debug_flag, double* cosx, double* sinx) {
+
+	struct figure circle = { "circle",num_points };
+	unsigned i, j;
+	int err = 0;
+
+	circle.points = kvzalloc(circle.n*sizeof(struct point),GFP_KERNEL);
+    for (i = 0; i < circle.n; ++i) {
+        MAKE_POINT(circle.points[i], i, circle.n - 1);
+    }
+    for (i = 0; i < circle.n; ++i) {
+		unsigned u = 0;
+		for (j = 0; j < circle.n; ++j) {
+			if (i == j)
+				continue;
+			circle.points[i].other[u++] = &circle.points[j];
+		}
+	}
+
+    FLATTEN_FUNCTION_VARIABLE(flatten_circle_arg_iter,circle,&circle);
+
+	for (i = 0; i < circle.n; ++i) {
+		kvfree(circle.points[i].other);
+	}
+	kvfree(circle.points);
+
+	return err;
+
+}
+
 static int kflat_circle_module_test(struct kflat *kflat, size_t num_points, int debug_flag, double* cosx, double* sinx) {
 
 	struct figure circle = { "circle",num_points };
@@ -887,6 +917,32 @@ static int kflat_stringset_test_iter(struct kflat *kflat, size_t num_strings, in
 	return err;
 }
 
+static int kflat_stringset_arg_module_test(struct kflat *kflat, size_t num_strings, int debug_flag) {
+
+	static const char chars[] = "ABCDEFGHIJ";
+	unsigned i,j;
+	int err = 0;
+
+	for (j=0; j<num_strings; ++j) {
+		char* s = libflat_zalloc(1,sizeof chars);
+		for (i=0; i<sizeof chars - 1; ++i) {
+			unsigned char u;
+			get_random_bytes(&u,1);
+			s[i] = chars[u%(sizeof chars - 1)];
+		}
+		stringset_insert(s);
+		libflat_free(s);
+	}
+
+	flat_infos("String set size: %zu\n",stringset_count(&stringset_root));
+
+	FLATTEN_FUNCTION_VARIABLE(flatten_stringset_arg_iter,stringset_root,&stringset_root);
+
+	stringset_destroy(&stringset_root);
+
+	return err;
+}
+
 static int kflat_stringset_module_test(struct kflat *kflat, size_t num_strings, int debug_flag) {
 
 	static const char chars[] = "ABCDEFGHIJ";
@@ -1119,6 +1175,10 @@ enum KFLAT_TEST_CASE {
 	STRUCTARRAY=11<<2,
 	CIRCLEM=12<<2,
 	RPOINTER=13<<2,
+	IFS_START=14<<2,
+	IFS_STOP=15<<2,
+	CIRCLEARG=16<<2,
+	STRINGSETARG=17<<2,
 };
 
 #include "kflat_test_data.h"
@@ -1126,6 +1186,20 @@ enum KFLAT_TEST_CASE {
 int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 
 	int err;
+
+	if ((arg&(~0x3))==IFS_START) {
+		flatten_init(kflat);
+		flatten_set_debug_flag(kflat,arg&0x01);
+		kflat_g_debug_cache = kflat->FLCTRL.debug_flag&1;
+	}
+
+	if ((arg&(~0x3))==IFS_STOP) {
+		flat_infos("@Flatten done: %d\n",kflat->errno);
+		if (!kflat->errno) {
+			err = flatten_write(kflat);
+		}
+		flatten_fini(kflat);
+	}
 
 	if ((arg&(~0x3))==SIMPLE) {
 		err = kflat_simple_test(kflat,arg&0x01);	/* Always recursive */
@@ -1143,6 +1217,11 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 		}
 	}
 
+	if ((arg&(~0x3))==CIRCLEARG) {
+		err = kflat_circle_test_arg_iter(kflat,750,arg&0x01,cosxi,sinxi);
+		if (err) return err;
+	}
+
 	if ((arg&(~0x3))==CIRCLEM) {
 		err = kflat_circle_module_test(kflat,750,arg&0x01,cosxi,sinxi);
 		if (err) return err;
@@ -1157,6 +1236,11 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 			err = kflat_stringset_test_iter(kflat,50000,arg&0x01);
 			if (err) return err;
 		}
+	}
+
+	if ((arg&(~0x3))==STRINGSETARG) {
+		err = kflat_stringset_arg_module_test(kflat,200000,arg&0x01);
+		if (err) return err;
 	}
 
 	if ((arg&(~0x3))==STRINGSETM) {

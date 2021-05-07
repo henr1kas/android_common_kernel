@@ -24,6 +24,11 @@
 #define LAST(node)  ((node)->last)
 
 struct rb_root recipe_fns = RB_ROOT;
+struct kflat kflat_g;
+struct kflat* kflat_g_p;
+int kflat_g_filter_pid_cache;
+int kflat_g_debug_cache;
+struct rb_root if_fns = RB_ROOT;
 EXPORT_SYMBOL(recipe_fns);
 
 struct recipe_node* recipe_search(const char* s) {
@@ -124,9 +129,10 @@ int recipe_delete(const char* s) {
 }
 EXPORT_SYMBOL(recipe_delete);
 
-void recipe_destroy(struct rb_root* root) {
+void recipe_destroy(void) {
 
-    struct rb_node * p = rb_first(root);
+	struct rb_root* root = &recipe_fns;
+	struct rb_node * p = rb_first(root);
     while(p) {
         struct recipe_node* data = (struct recipe_node*)p;
         rb_erase(p, root);
@@ -137,8 +143,9 @@ void recipe_destroy(struct rb_root* root) {
 }
 EXPORT_SYMBOL(recipe_destroy);
 
-size_t recipe_count(const struct rb_root* root) {
+size_t recipe_count(void) {
 
+	struct rb_root* root = &recipe_fns;
 	struct rb_node * p = rb_first(root);
 	size_t count = 0;
 	while(p) {
@@ -148,6 +155,98 @@ size_t recipe_count(const struct rb_root* root) {
 	return count;
 }
 EXPORT_SYMBOL(recipe_count);
+
+struct ifns_node* ifns_search(const char* s) {
+
+	struct rb_node *node = if_fns.rb_node;
+
+	while (node) {
+		struct ifns_node* data = container_of(node, struct ifns_node, node);
+
+		if (strcmp(s,data->s)<0) {
+			node = node->rb_left;
+		}
+		else if (strcmp(s,data->s)>0) {
+			node = node->rb_right;
+		}
+		else
+			return data;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(ifns_search);
+
+int ifns_insert(const char* s, void* arg) {
+
+	struct ifns_node* data = libflat_zalloc(1,sizeof(struct ifns_node));
+	struct rb_node **new, *parent = 0;
+	data->s = libflat_zalloc(1,strlen(s)+1);
+	strcpy(data->s,s);
+	data->f = arg;
+	new = &(if_fns.rb_node);
+
+	/* Figure out where to put new node */
+	while (*new) {
+		struct ifns_node* this = container_of(*new, struct ifns_node, node);
+
+		parent = *new;
+		if (strcmp(data->s,this->s)<0)
+			new = &((*new)->rb_left);
+		else if (strcmp(data->s,this->s)>0)
+			new = &((*new)->rb_right);
+		else {
+		    libflat_free((void*)data->s);
+		    libflat_free(data);
+		    return 0;
+		}
+	}
+
+	/* Add new node and rebalance tree. */
+	rb_link_node(&data->node, parent, new);
+	rb_insert_color(&data->node, &if_fns);
+
+	return 1;
+}
+EXPORT_SYMBOL(ifns_insert);
+
+int ifns_delete(const char* s) {
+
+	struct ifns_node* node = ifns_search(s);
+	if (node) {
+		rb_erase(&node->node, &if_fns);
+		return 1;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(ifns_delete);
+
+void ifns_destroy(void) {
+
+	struct rb_root* root = &if_fns;
+	struct rb_node * p = rb_first(root);
+    while(p) {
+        struct ifns_node* data = (struct ifns_node*)p;
+        rb_erase(p, root);
+        p = rb_next(p);
+        libflat_free((void*)data->s);
+        libflat_free(data);
+    }
+}
+EXPORT_SYMBOL(ifns_destroy);
+
+size_t ifns_count(void) {
+
+	const struct rb_root* root = &if_fns;
+	struct rb_node * p = rb_first(root);
+	size_t count = 0;
+	while(p) {
+		count++;
+		p = rb_next(p);
+	}
+	return count;
+}
+EXPORT_SYMBOL(ifns_count);
 
 INTERVAL_TREE_DEFINE(struct flat_node, rb,
 		     uintptr_t, __subtree_last,
@@ -405,6 +504,7 @@ int bqueue_init(struct kflat* kflat, struct bqueue* q, size_t block_size) {
     q->back_index=0;
     return 0;
 }
+EXPORT_SYMBOL(bqueue_init);
 
 void bqueue_destroy(struct bqueue* q) {
 
@@ -415,16 +515,19 @@ void bqueue_destroy(struct bqueue* q) {
         kflat_free(tmp);
     }
 }
+EXPORT_SYMBOL(bqueue_destroy);
 
 int bqueue_empty(struct bqueue* q) {
 
     return q->size == 0;
 }
+EXPORT_SYMBOL(bqueue_empty);
 
 size_t bqueue_size(struct bqueue* q) {
 
     return q->size;
 }
+EXPORT_SYMBOL(bqueue_size);
 
 
 int bqueue_push_back(struct kflat* kflat, struct bqueue* q, const void* m, size_t s) {
@@ -482,6 +585,7 @@ int bqueue_pop_front(struct bqueue* q, void* m, size_t s) {
 
     return 0;
 }
+EXPORT_SYMBOL(bqueue_pop_front);
 
 #define ADDR_KEY(p)	((((p)->inode)?((p)->inode->start):0) + (p)->offset)
 
@@ -1130,6 +1234,7 @@ int root_addr_append(struct kflat* kflat, uintptr_t root_addr) {
     }
     return 0;
 }
+EXPORT_SYMBOL(root_addr_append);
 
 size_t root_addr_count(struct kflat* kflat) {
 	struct root_addrnode* p = kflat->FLCTRL.rhead;
@@ -1295,15 +1400,32 @@ struct flatten_pointer* flatten_plain_type(struct kflat* kflat, const void* _ptr
 }
 EXPORT_SYMBOL(flatten_plain_type);
 
+int kflat_linear_memory_realloc(struct kflat* kflat, size_t nsize) {
+	void* nmem = 0;
+	if (nsize==kflat->msize) return 0;
+	if (kflat->mptrindex>0) return EFAULT;
+	nmem = kvzalloc(nsize,GFP_KERNEL);
+	if (!nmem) {
+		flat_errs("Failed to reallocate kflat memory pool for new size %zu\n",nsize);
+		return ENOMEM;
+	}
+	kflat->msize = nsize;
+	kvfree(kflat->mpool);
+	kflat->mpool = nmem;
+	return 0;
+}
+
 void flatten_init(struct kflat* kflat) {
 	memset(&kflat->FLCTRL,0,sizeof(struct FLCONTROL));
 	kflat->FLCTRL.fixup_set_root = RB_ROOT_CACHED;
 	kflat->FLCTRL.imap_root = RB_ROOT_CACHED;
-	kflat->mptr = 0;
+	kflat->mptrindex = 0;
+	kflat->msize = 0;
 #if LINEAR_MEMORY_ALLOCATOR>0
-	kflat->mpool = kvzalloc(KFLAT_LINEAR_MEMORY_POOL_SIZE,GFP_KERNEL);
+	kflat->msize = KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE;
+	kflat->mpool = kvzalloc(KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE,GFP_KERNEL);
 	if (!kflat->mpool) {
-		flat_errs("Failed to allocate initial kflat memory pool of size %zu\n",KFLAT_LINEAR_MEMORY_POOL_SIZE);
+		flat_errs("Failed to allocate initial kflat memory pool of size %zu\n",KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE);
 		kflat->errno = ENOMEM;
 	}
 #else
@@ -1324,15 +1446,15 @@ int flatten_write(struct kflat* kflat) {
 	int err;
 
 	if ((err=flatten_write_internal(kflat,&written))==0) {
-		flat_infos("OK. Flatten size: %lu, %lu pointers, %lu function pointers, %lu continuous memory fragments,"
-				"%zu bytes written, memory used: %zu\n",
-			kflat->FLCTRL.HDR.memory_size,kflat->FLCTRL.HDR.ptr_count,kflat->FLCTRL.HDR.fptr_count,
-			kflat->FLCTRL.HDR.mcount,written-sizeof(size_t),kflat->mptr);
+		flat_infos("OK. Flatten size: %lu, %lu pointers, %zu root pointers, %lu function pointers, %lu continuous memory fragments,"
+				"%zu bytes written, memory used: %zu, memory avail: %zu\n",
+			kflat->FLCTRL.HDR.memory_size,kflat->FLCTRL.HDR.ptr_count,kflat->FLCTRL.HDR.root_addr_count,kflat->FLCTRL.HDR.fptr_count,
+			kflat->FLCTRL.HDR.mcount,written-sizeof(size_t),kflat->mptrindex,kflat->msize);
 	}
 	else {
-		flat_errs("ERROR %d: Could not write flatten image. Flatten size: %lu, %lu pointers, %lu function pointers,"
+		flat_errs("ERROR %d: Could not write flatten image. Flatten size: %lu, %lu pointers, %zu root pointers, %lu function pointers,"
 				"%lu continuous memory fragments, %zu bytes written\n",kflat->errno,kflat->FLCTRL.HDR.memory_size,
-				kflat->FLCTRL.HDR.ptr_count,kflat->FLCTRL.HDR.fptr_count,kflat->FLCTRL.HDR.mcount,written-sizeof(size_t));
+				kflat->FLCTRL.HDR.ptr_count,kflat->FLCTRL.HDR.root_addr_count,kflat->FLCTRL.HDR.fptr_count,kflat->FLCTRL.HDR.mcount,written-sizeof(size_t));
 	}
 
 	*((size_t*)(kflat->area)) = written-sizeof(size_t);
@@ -1403,7 +1525,8 @@ int flatten_fini(struct kflat* kflat) {
     return interval_tree_destroy(kflat,&kflat->FLCTRL.imap_root.rb_root);
 #if LINEAR_MEMORY_ALLOCATOR
     kvfree(kflat->mpool);
-    kflat->mptr = 0;
+    kflat->mptrindex = 0;
+    kflat->msize = 0;
 #endif
 }
 
@@ -1414,13 +1537,20 @@ void flatten_set_debug_flag(struct kflat* kflat, int flag) {
 void flatten_set_option(struct kflat* kflat, int option) {
 	kflat->FLCTRL.option |= option;
 }
+EXPORT_SYMBOL(flatten_set_option);
 
 void flatten_clear_option(struct kflat* kflat, int option) {
 	kflat->FLCTRL.option &= ~option;
 }
+EXPORT_SYMBOL(flatten_clear_option);
 
-int kflat_in_progress(struct kflat* kflat) {
-	return (kflat->FLCTRL.option & KFLAT_OPTION_IN_PROGRESS);
+int kflat_in_progress() {
+	struct kflat* kflat = get_current()->kflat;
+	if ((kflat_g_p && (kflat_g_p->FLCTRL.option & KFLAT_OPTION_IN_PROGRESS)) ||
+			(kflat && (kflat->FLCTRL.option & KFLAT_OPTION_IN_PROGRESS))) {
+		return 1;
+	}
+	return 0;
 }
 EXPORT_SYMBOL(kflat_in_progress);
 

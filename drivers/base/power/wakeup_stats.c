@@ -68,6 +68,10 @@ static ssize_t max_time_ms_show(struct device *dev,
 	ktime_t active_time;
 	ktime_t max_time = ws->max_time;
 
+	FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED(max_time_ms_show,dev,dev);
+	FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED(max_time_ms_show,attr,attr);
+	FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED(max_time_ms_show,buf,buf);
+
 	if (ws->active) {
 		active_time = ktime_sub(ktime_get(), ws->last_time);
 		if (active_time > max_time)

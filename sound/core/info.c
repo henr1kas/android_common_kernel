@@ -295,6 +295,8 @@ static const struct file_operations snd_info_entry_operations =
 	.release =		snd_info_entry_release,
 };
 
+#define flat_info(fmt) printk(KERN_INFO fmt);
+
 /*
  * file ops for text proc files
  */
@@ -309,6 +311,9 @@ static ssize_t snd_info_text_entry_write(struct file *file,
 	loff_t pos;
 	size_t next;
 	int err = 0;
+
+	FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED(snd_info_text_entry_write,file,file);
+	FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED(sound__core__info_c,snd_info_entry_operations,&snd_info_entry_operations);
 
 	if (!entry->c.text.write)
 		return -EIO;

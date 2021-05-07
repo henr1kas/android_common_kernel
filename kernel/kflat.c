@@ -58,6 +58,8 @@ void kflat_task_init(struct task_struct *t)
 	t->kflat = 0;
 }
 
+void flatten_set_debug_flag(struct kflat* kflat, int flag);
+
 void kflat_task_exit(struct task_struct *t)
 {
 	struct kflat *kflat;
@@ -82,8 +84,50 @@ static int kflat_ioctl_locked(struct kflat *kflat, unsigned int cmd,
 {
 	struct task_struct *t;
 	unsigned long size, unused;
+	long filter_pid;
 
 	switch (cmd) {
+	case KFLAT_GLOBAL_ENABLE:
+		if (kflat_g.mode != KFLAT_MODE_DISABLED) {
+			return -EBUSY;
+		}
+		if (kflat_g_p) {
+			return -EBUSY;
+		}
+		kflat_g.size = arg;
+		kflat_g.mode = KFLAT_MODE_ENABLED;
+		kflat_g.filter_pid = 0;
+		kflat_g_filter_pid_cache = 0;
+		kflat_g_p = &kflat_g;
+		return 0;
+	case KFLAT_GLOBAL_DISABLE:
+		memset(&kflat_g,0,sizeof(struct kflat));
+		kflat_g_p = 0;
+		return 0;
+	case KFLAT_LINEAR_MEMORY_REALLOC:
+#if LINEAR_MEMORY_ALLOCATOR>0
+		if (kflat_g.mode != KFLAT_MODE_ENABLED) {
+			return -EBUSY;
+		}
+		if (!kflat_g_p) {
+			return -EBUSY;
+		}
+		return kflat_linear_memory_realloc(kflat_g_p,arg);
+#endif
+	case KFLAT_SET_FILTER_PID:
+		if (kflat_g.mode != KFLAT_MODE_ENABLED) {
+			return -EBUSY;
+		}
+		if (!kflat_g_p) {
+			return -EBUSY;
+		}
+		filter_pid = (long)arg;
+		kflat_g.filter_pid = filter_pid;
+		kflat_g_filter_pid_cache = filter_pid;
+		if (kflat_g.FLCTRL.debug_flag&1) {
+			flat_infos("Filter PID was set to %d\n",kflat_g.filter_pid);
+		}
+		return 0;
 	case KFLAT_INIT:
 		if (kflat->mode != KFLAT_MODE_DISABLED)
 			return -EBUSY;
@@ -132,8 +176,21 @@ static int kflat_ioctl_locked(struct kflat *kflat, unsigned int cmd,
 		kflat_put(kflat);
 		return 0;
 	case KFLAT_TEST:
-		kflat_ioctl_test(kflat,cmd,arg);
+		if ((kflat_g.mode == KFLAT_MODE_ENABLED) && (kflat_g_p)) {
+			kflat_ioctl_test(kflat_g_p,cmd,arg);
+		}
+		else {
+			kflat_ioctl_test(kflat,cmd,arg);
+		}
 		return 0;
+	case KFLAT_SET_FLAG:
+		if ((kflat_g.mode == KFLAT_MODE_ENABLED) && (kflat_g_p)) {
+			flatten_set_debug_flag(kflat,arg&0x01);
+			return 0;
+		}
+		else {
+			return -EINVAL;
+		}
 	default:
 		return -ENOTTY;
 	}
@@ -159,7 +216,7 @@ static int kflat_mmap(struct file *filep, struct vm_area_struct *vma)
 {
 	int res = 0;
 	void *area;
-	struct kflat *kflat = vma->vm_file->private_data;
+	struct kflat *kflat;
 	unsigned long size, off;
 	struct page *page;
 
@@ -167,6 +224,30 @@ static int kflat_mmap(struct file *filep, struct vm_area_struct *vma)
 	if (!area)
 		return -ENOMEM;
 
+	//flat_infos("kflat_mmap: %lx\n",area);
+
+	if (kflat_g_p && kflat_g_p->mode == KFLAT_MODE_ENABLED) {
+		spin_lock(&kflat_g_p->lock);
+		size = kflat_g_p->size;
+		//flat_infos("mmap size: %zu\n",size);
+		if (!kflat_g_p->area) {
+			kflat_g_p->area = area;
+			vma->vm_flags |= VM_DONTEXPAND;
+			spin_unlock(&kflat_g_p->lock);
+			for (off = 0; off < size; off += PAGE_SIZE) {
+				page = vmalloc_to_page(kflat_g_p->area + off);
+				if (vm_insert_page(vma, vma->vm_start + off, page))
+					WARN_ONCE(1, "vm_insert_page() failed");
+			}
+			//flat_infos("mmap return: %d\n",0);
+			return 0;
+		}
+		spin_unlock(&kflat_g_p->lock);
+		vfree(area);
+		return -EINVAL;
+	}
+
+	kflat = vma->vm_file->private_data;
 	spin_lock(&kflat->lock);
 	size = kflat->size;
 	if (kflat->mode == KFLAT_MODE_DISABLED	 || vma->vm_pgoff != 0 ||

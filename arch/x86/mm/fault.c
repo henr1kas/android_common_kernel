@@ -1251,7 +1251,7 @@ do_kern_addr_fault(struct pt_regs *regs, unsigned long hw_error_code,
 		   unsigned long address)
 {
 	/* Check if kflat is working (and we just tried to serialize invalid pointer) */
-	if (kflat_in_progress(get_current()->kflat)) {
+	if (kflat_in_progress()) {
 		flat_infos("Kernel address fault on 0x%lx during flattening stage\n",address);
 		WRITE_ONCE(get_current()->kflat->errno,EFAULT);
 		regs->ip = get_current()->kflat->retv;

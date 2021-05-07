@@ -132,8 +132,75 @@ $(obj)/%.ll: $(src)/%.c FORCE
 # The C file is compiled and updated dependency information is generated.
 # (See cmd_cc_o_c + relevant part of rule_cc_o_c)
 
+# Command line macros defined by kflat
+KFLAT_MACROS:=-D__STR\(s\)=\#s -DFLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED\(__f,__var,__arg\)="\
+	do { 	\
+		extern void* kflat_g_p;	\
+		extern void* ifns_search(const char* s);	\
+		extern int kflat_g_filter_pid_cache;	\
+		extern int kflat_g_debug_cache;	\
+		typedef struct {	\
+			struct {	\
+				unsigned long  __0;	\
+				struct {} * __1;	\
+				struct {} * __2;	\
+			} __attribute__((aligned(sizeof(long))));	\
+			const char* __3;	\
+			void (*__4)(struct kflat* kflat, const void* __arg);	\
+		} __f\#\#__\#\#__var\#\#__\#\#ifnode_t;	\
+		if (unlikely(kflat_g_p)) {	\
+			if ((kflat_g_filter_pid_cache<0)||(task_pid_nr(get_current()->parent)==kflat_g_filter_pid_cache)) {	\
+				__f\#\#__\#\#__var\#\#__\#\#ifnode_t* ifnode = (__f\#\#__\#\#__var\#\#__\#\#ifnode_t*)ifns_search(__STR(IF__\#\#__f\#\#__\#\#__var));	\
+				if (!ifnode) {	\
+					printk(KERN_INFO \"kflat: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: interface function string not found (%s)\\n\",__STR(IF__\#\#__f\#\#__\#\#__var));	\
+				}	\
+				else {	\
+					printk(KERN_INFO \"kflat: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: %s(%s:%s)\\n\",\#__f,\#__var,\#__arg);	\
+					(*ifnode->__4)(kflat_g_p,__arg);	\
+				}	\
+			} else {	\
+				if (kflat_g_debug_cache)	\
+					printk(KERN_INFO \"kflat: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: %s(%s:%s) - current ppid (%d) not matching filter pid (%d)\\n\",	\
+						\#__f,\#__var,\#__arg,task_pid_nr(get_current()->parent),kflat_g_filter_pid_cache); \
+			}	\
+		}	\
+	}	\
+	while(0);" -DFLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED\(__fn,__var,__gptr\)="\
+	do { 	\
+		extern void* kflat_g_p;	\
+		extern void* ifns_search(const char* s);	\
+		extern int kflat_g_filter_pid_cache;	\
+		extern int kflat_g_debug_cache;	\
+		typedef struct {	\
+			struct {	\
+				unsigned long  __0;	\
+				struct {} * __1;	\
+				struct {} * __2;	\
+			} __attribute__((aligned(sizeof(long))));	\
+			const char* __3;	\
+			void (*__4)(struct kflat* kflat, const void* __arg);	\
+		} __fn\#\#__\#\#__var\#\#__\#\#ifnode_t;	\
+		if (unlikely(kflat_g_p)) {	\
+			if ((kflat_g_filter_pid_cache<0)||(task_pid_nr(get_current()->parent)==kflat_g_filter_pid_cache)) {	\
+				__fn\#\#__\#\#__var\#\#__\#\#ifnode_t* ifnode = (__fn\#\#__\#\#__var\#\#__\#\#ifnode_t*)ifns_search(__STR(GV__\#\#__fn\#\#__\#\#__var));	\
+				if (!ifnode) {	\
+					printk(KERN_INFO \"kflat: \" \"FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED: interface function string not found (%s)\\n\",__STR(GV__\#\#__fn\#\#__\#\#__var));	\
+				}	\
+				else {	\
+					printk(KERN_INFO \"kflat: \" \"FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED: %s(%s:%s)\\n\",\#__fn,\#__var,\#__gptr);	\
+					(*ifnode->__4)(kflat_g_p,__gptr);	\
+				}	\
+			} else {	\
+				if (kflat_g_debug_cache)	\
+					printk(KERN_INFO \"kflat: \" \"FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED: %s(%s:%s) - current ppid (%d) not matching filter pid (%d)\\n\",	\
+						\#__fn,\#__var,\#__gptr,task_pid_nr(get_current()->parent),kflat_g_filter_pid_cache); \
+			}	\
+		}	\
+	}	\
+	while(0);"
+
 quiet_cmd_cc_o_c = CC $(quiet_modtag)  $@
-      cmd_cc_o_c = $(CC) $(c_flags) -c -o $@ $<
+      cmd_cc_o_c = $(CC) $(c_flags) $(KFLAT_MACROS) -c -o $@ $<
 
 ifdef CONFIG_MODVERSIONS
 # When module versioning is enabled the following steps are executed:
