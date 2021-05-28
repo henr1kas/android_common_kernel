@@ -14,10 +14,14 @@ IFUNCS_COUNT=$(lsmod | tail -n +2 | awk '{print $1}' | grep ${KERNEL_PRODUCT}_if
 insmod /data/local/tmp/${KERNEL_PRODUCT}_recipes.ko || { exit 2; }
 insmod /data/local/tmp/${KERNEL_PRODUCT}_ifuncs.ko || { exit 2; }
 
-echo "Running interface functions in the process $$"
-/data/local/tmp/kflattest SET_FILTERPID "$$" || { exit 2; }
+# Trigger flattening global variables used in AoT
+echo "Running triggers for global variables used in AoT"
+/data/local/tmp/kflattest GLOBALTRIGGER || { exit 2; }
+
+#echo "Running interface functions in the process $$"
+#/data/local/tmp/kflattest SET_FILTERPID "$$" || { exit 2; }
 
 # Run interface functions
-source /data/local/tmp/flat_triggers.sh
+#source /data/local/tmp/flat_triggers.sh
 
 /data/local/tmp/kflattest IFS_STOP || { exit 2; }

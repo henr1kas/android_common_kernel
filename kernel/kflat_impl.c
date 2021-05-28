@@ -398,9 +398,9 @@ int binary_stream_calculate_index(struct kflat* kflat) {
     		else if (index%cp->alignment) {
     			align=cp->alignment-(index%cp->alignment);
     		}
-    		kflat_free(padding);
     		v = binary_stream_insert_front(kflat,padding,align,cp);
     		if (v==0) return ENOMEM;
+    		kflat_free(padding);
     		v->index = index;
     		index+=v->size;
     	}
@@ -494,7 +494,7 @@ int bqueue_init(struct kflat* kflat, struct bqueue* q, size_t block_size) {
 
     q->block_size = block_size;
     q->size = 0;
-    q->front_block = kflat_zalloc(kflat,block_size+sizeof(struct queue_block*),1);
+    q->front_block = kflat_bqueue_zalloc(kflat,block_size+sizeof(struct queue_block*),1);
     if (!q->front_block) {
     	return ENOMEM;
     }
@@ -512,7 +512,7 @@ void bqueue_destroy(struct bqueue* q) {
     while(back) {
         struct queue_block* tmp = back;
         back = back->next;
-        kflat_free(tmp);
+        kflat_bqueue_free(tmp);
     }
 }
 EXPORT_SYMBOL(bqueue_destroy);
@@ -538,10 +538,10 @@ int bqueue_push_back(struct kflat* kflat, struct bqueue* q, const void* m, size_
         size_t copy_size = (s>avail_size)?(avail_size):(s);
         memcpy(q->front_block->data+q->front_index,m+copied,copy_size);
         copied+=copy_size;
-        if (s>=avail_size) {
+        if (unlikely(s>=avail_size)) {
         	struct queue_block* new_block;
             s=s-avail_size;
-            new_block = kflat_zalloc(kflat,q->block_size+sizeof(struct queue_block*),1);
+            new_block = kflat_bqueue_zalloc(kflat,q->block_size+sizeof(struct queue_block*),1);
             if (!new_block) {
             	return ENOMEM;
             }
@@ -576,7 +576,7 @@ int bqueue_pop_front(struct bqueue* q, void* m, size_t s) {
         	s=s-avail_size;
             tmp = q->back_block;
             q->back_block = q->back_block->next;
-            kflat_free(tmp);
+            kflat_bqueue_free(tmp);
         }
         else s=0;
         q->back_index = (q->back_index+copy_size)%q->block_size;
@@ -1404,6 +1404,7 @@ int kflat_linear_memory_realloc(struct kflat* kflat, size_t nsize) {
 	void* nmem = 0;
 	if (nsize==kflat->msize) return 0;
 	if (kflat->mptrindex>0) return EFAULT;
+	if (kflat->bqueue_mptrindex>0) return EFAULT;
 	nmem = kvzalloc(nsize,GFP_KERNEL);
 	if (!nmem) {
 		flat_errs("Failed to reallocate kflat memory pool for new size %zu\n",nsize);
@@ -1412,6 +1413,14 @@ int kflat_linear_memory_realloc(struct kflat* kflat, size_t nsize) {
 	kflat->msize = nsize;
 	kvfree(kflat->mpool);
 	kflat->mpool = nmem;
+	nmem = kvzalloc(nsize,GFP_KERNEL);
+	if (!nmem) {
+		flat_errs("Failed to reallocate kflat bqueue memory pool for new size %zu\n",nsize);
+		return ENOMEM;
+	}
+	kflat->bqueue_msize = nsize;
+	kvfree(kflat->bqueue_mpool);
+	kflat->bqueue_mpool = nmem;
 	return 0;
 }
 
@@ -1421,6 +1430,8 @@ void flatten_init(struct kflat* kflat) {
 	kflat->FLCTRL.imap_root = RB_ROOT_CACHED;
 	kflat->mptrindex = 0;
 	kflat->msize = 0;
+	kflat->bqueue_mptrindex = 0;
+	kflat->bqueue_msize = 0;
 #if LINEAR_MEMORY_ALLOCATOR>0
 	kflat->msize = KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE;
 	kflat->mpool = kvzalloc(KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE,GFP_KERNEL);
@@ -1428,8 +1439,15 @@ void flatten_init(struct kflat* kflat) {
 		flat_errs("Failed to allocate initial kflat memory pool of size %zu\n",KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE);
 		kflat->errno = ENOMEM;
 	}
+	kflat->bqueue_msize = KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE;
+	kflat->bqueue_mpool = kvzalloc(KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE,GFP_KERNEL);
+	if (!kflat->bqueue_mpool) {
+		flat_errs("Failed to allocate initial kflat bqueue memory pool of size %zu\n",KFLAT_LINEAR_MEMORY_INITIAL_POOL_SIZE);
+		kflat->errno = ENOMEM;
+	}
 #else
 	kflat->mpool = 0;
+	kflat->bqueue_mpool = 0;
 #endif
 }
 
@@ -1467,6 +1485,9 @@ int flatten_base_function_address(void) {
 	return vi;
 }
 EXPORT_SYMBOL(flatten_base_function_address);
+
+int flatten_base_global_address;
+EXPORT_SYMBOL(flatten_base_global_address);
 
 int flatten_write_internal(struct kflat* kflat, size_t* wcounter_p) {
 
@@ -1527,6 +1548,9 @@ int flatten_fini(struct kflat* kflat) {
     kvfree(kflat->mpool);
     kflat->mptrindex = 0;
     kflat->msize = 0;
+    kvfree(kflat->bqueue_mpool);
+    kflat->bqueue_mptrindex = 0;
+    kflat->bqueue_msize = 0;
 #endif
 }
 

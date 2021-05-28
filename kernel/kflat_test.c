@@ -21,6 +21,88 @@
 #include <linux/stop_machine.h>
 #include <linux/kflat.h>
 
+/* Global variables for flatten test */
+
+int kflat_global_int;
+
+enum kflat_global_enum {
+	kflat_global_enum_val0,
+	kflat_global_enum_val1,
+};
+
+enum kflat_global_enum kflat_global_enum_named;
+enum kflat_global_enum kflat_global_enum_named_array[5];
+
+enum { kflat_global_enum_n_val0, kflat_global_enum_n_val1 } kflat_global_enum_nonamed;
+
+typedef enum kflat_global_enum kflat_global_enum_t;
+kflat_global_enum_t kflat_global_enum_typedef;
+kflat_global_enum_t* kflat_global_enum_typedef_pointer;
+
+struct kflat_global_struct {
+	int i;
+};
+
+union kflat_global_union {
+	int i;
+	long l;
+};
+
+struct kflat_global_struct kflat_global_struct;
+union kflat_global_union kflat_global_union;
+
+struct { int i; } kflat_global_struct_nonamed;
+
+int kflat_global_int_array[20];
+struct kflat_global_struct kflat_global_struct_array[5];
+
+struct { int i; } kflat_global_struct_nonamed_array[2];
+
+int* kflat_global_int_p = &kflat_global_int;
+int** kflat_global_int_pp = &kflat_global_int_p;
+
+struct kflat_global_struct* kflat_global_struct_p = &kflat_global_struct;
+struct kflat_global_struct* kflat_global_struct_pa = kflat_global_struct_array;
+struct kflat_global_struct** kflat_global_struct_pp = &kflat_global_struct_p;
+enum kflat_global_enum* kflat_global_enum_named_p = &kflat_global_enum_named;
+
+struct kflat_global_struct** kflat_global_struct_pp_array[9];
+
+char* kflat_global_string = "kflat";
+void* kfalt_global_void = "kflat";
+
+void (*kflat_global_fun)(int);
+void (*kflat_global_fun_array[12])(int);
+
+typedef void (*kflat_global_fun_t)(int);
+kflat_global_fun_t kflat_global_function_pointer_array_typedef[3];
+
+int* kflat_global_pointer_array[8];
+const char* kflat_global_string_array[4];
+struct kflat_global_struct* kflat_global_struct_pointer_array[4];
+
+typedef int myInt;
+typedef myInt myIntInt;
+typedef myIntInt myIntIntInt;
+
+myIntIntInt kflat_global_typedef_int;
+
+typedef struct kflat_global_struct my_global_struct_t;
+my_global_struct_t kflat_global_struct_typedef;
+
+typedef struct kflat_global_struct my_global_struct_array_t[2];
+my_global_struct_array_t kflat_global_struct_typedef_array;
+
+my_global_struct_t* kflat_global_struct_pointer_typedef;
+
+struct kflat_struct_forward;
+struct kflat_struct_forward* kflat_global_struct_forward;
+
+myIntInt kflat_global_typedef_int_array[20];
+my_global_struct_t global_typedef_struct_array[5];
+
+/* done */
+
 #define START(node) ((node)->start)
 #define LAST(node)  ((node)->last)
 
@@ -34,6 +116,9 @@ struct string_node {
 };
 
 void flatten_set_debug_flag(struct kflat* kflat, int flag);
+
+void (*flatten_global_variables_g)(struct kflat* kflat) = 0;
+EXPORT_SYMBOL(flatten_global_variables_g);
 
 static struct rb_root stringset_root = RB_ROOT;
 
@@ -1179,6 +1264,8 @@ enum KFLAT_TEST_CASE {
 	IFS_STOP=15<<2,
 	CIRCLEARG=16<<2,
 	STRINGSETARG=17<<2,
+	GLOBALCHECK=19<<2,
+	GLOBALTRIGGER=20<<2,
 };
 
 #include "kflat_test_data.h"
@@ -1309,6 +1396,21 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 		else {
 			err = kflat_structarray_test_iter(kflat,arg&0x01);
 			if (err) return err;
+		}
+	}
+
+	if ((arg&(~0x3))==GLOBALCHECK) {
+		struct class *wakeup_class;
+		static unsigned long stringset_root_base_address = 0xffffffff8330a668;
+		static unsigned long wakeup_class_base_address = 0xffffffff833451c0;
+		long global_offset = GLOBAL_ADDR_OFFSET(&stringset_root,stringset_root_base_address);
+		wakeup_class = *((struct class**)(wakeup_class_base_address + global_offset));
+		flat_infos("wakeup_class:name: %s\n",wakeup_class->name);
+	}
+
+	if ((arg&(~0x3))==GLOBALTRIGGER) {
+		if (flatten_global_variables_g) {
+			(*flatten_global_variables_g)(kflat);
 		}
 	}
 

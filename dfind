@@ -1,0 +1,869 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import json
+
+def getAttrNum(RT):
+	if "attrnum" in RT:
+		return RT["attrnum"]
+	else:
+		return 0
+
+def isAnonRecordDependent(RT,depT):
+	if RT["id"]==depT["id"]:
+		return True
+	elif (depT["class"]=="const_array" or depT["class"]=="incomplete_array") and depT["refs"][0]==RT["id"]:
+		# struct { u16 index; u16 dist;} near[0];
+		return True
+	else:
+		return False
+
+class DerefInfo:
+	
+	def __init__(self):
+		
+		with open("db.json","rb") as f:
+			self.db = json.loads(f.read())
+		self.frefmap = {}
+		self.fnrefmap = {}
+		for x in self.db["funcs"]:
+			self.frefmap[x["id"]] = x
+			if x["name"] in self.fnrefmap:
+				self.fnrefmap[x["name"]].append(x["id"])
+			else:
+				self.fnrefmap[x["name"]] = [x["id"]]
+		self.fdrefmap = {}
+		for x in self.db["funcdecls"]:
+			self.fdrefmap[x["id"]] = x
+		self.refmap = {}
+		for x in self.db["types"]:
+			self.refmap[x["id"]] = x
+		self.grefmap = {}
+		for x in self.db["globals"]:
+			self.grefmap[x["id"]] = x
+		self.report_errors = False
+		self.ptr_to_void_type = self.lookForPtrToVoid()
+		if len(self.ptr_to_void_type)<=0:
+			print "Couldn't find void* type in JSON database. Giving up"
+			sys.exit(0)
+
+	def lookForPtrToVoid(self):
+
+		pv = set(())
+		for x in self.db["types"]:
+			if x["class"]=="pointer":
+				pteT = self.refmap[x["refs"][0]]
+				if pteT["class"]=="builtin" and pteT["str"]=="void":
+					pv.add(x["id"])
+		return pv
+
+	# Deprecated
+	def getMemberRefIndex(self,T,n):
+
+		ignore_count=0
+		# As of the current quirk of dbjson when there's anonymous record inside a structure followed by a name we will have two entries in "refs"
+		#  but only single entry in "memberoffsets"
+		#	struct X { ... };       // ignore "__!recorddecl__" from refs/refnames/usedrefs (present in decls)
+		#	struct X { ... } w;     // ignore "__!recorddecl__" from refs/refnames/usedrefs (present in decls)
+		#	struct { ... };         // "__!anonrecord__" as a normal member (present in decls)
+		#	struct { ... } w;       // ignore "__!anonrecord__" from refs/refnames/usedrefs (present in decls)
+		#  summary: ignore all "__!recorddecl__" from decls and "__!anonrecord__" if there's the same refs entry that follows
+		for i in xrange(len(T["refnames"])-getAttrNum(T)):
+			if i in T["decls"] and ( T["refnames"][i]!="__!anonrecord__" or (i+1<len(T["refs"]) and 
+					isAnonRecordDependent(self.refmap[T["refs"][i]],self.refmap[T["refs"][i+1]]))):
+				ignore_count+=1
+				continue
+			if i-ignore_count>=n:
+				return i-ignore_count
+		# Shouldn't get in here
+		print "ERROR: Couldn't get member %d from type:"%(n)
+		print json.dumps(T,indent=4)
+		sys.exit(1)
+
+	def walkTPD(self,TPD):
+		T = self.refmap[TPD["refs"][0]]
+		if T["class"]=="typedef":
+			return self.walkTPD(T)
+		else:
+			return T
+
+	def resolve_record_pointer(self,TID,havePtr=False,TPD=None):
+
+		T = self.refmap[TID]
+		if T["class"]=="record":
+			if havePtr is True:
+				return T,TPD
+			else:
+				return None,None
+		elif T["class"]=="pointer":
+			if havePtr is True:
+				return None,None
+			else:
+				TPD = None
+				return self.resolve_record_pointer(T["refs"][0],True,TPD)
+		elif T["class"]=="typedef":
+			if TPD is None:
+				TPD = T
+			return self.resolve_record_pointer(T["refs"][0],havePtr,TPD)
+		elif T["class"]=="attributed":
+			return self.resolve_record_pointer(T["refs"][0],havePtr,TPD)
+		else:
+			return None,None
+
+
+	def resolve_record_type(self,T):
+
+		if T["class"]=="record":
+			return T
+		elif T["class"]=="pointer" or T["class"]=="typedef" or T["class"]=="attributed":
+			return self.resolve_record_type(self.refmap[T["refs"][0]])
+
+	def resolve_record_typedef(self,T,TPD=None):
+
+		if T["class"]=="record":
+			if TPD:
+				return TPD
+			else:
+				return None
+		elif T["class"]=="typedef":
+			if TPD:
+				return self.resolve_record_typedef(self.refmap[T["refs"][0]],TPD)
+			else:
+				return self.resolve_record_typedef(self.refmap[T["refs"][0]],T)
+		elif T["class"]=="pointer" or T["class"]=="attributed":
+			TPD=None
+			return self.resolve_record_typedef(self.refmap[T["refs"][0]],TPD)
+
+	def type_abbrev(self,TID):
+		T = self.refmap[TID]
+		if T["class"]=="record":
+			return "struct %s"%(T["str"])
+		elif T["class"]=="pointer":
+			return self.type_abbrev(T["refs"][0])+"*"
+		elif T["class"]=="typedef":
+			return "%s"%(T["name"])
+		elif T["class"]=="attributed":
+			return self.type_abbrev(T["refs"][0])
+		else:
+			return T["str"]
+
+	def lookForSingleMemberExpr(self,rhsOffsetrefs):
+		
+		mref = None
+		for oref in rhsOffsetrefs:
+			if oref["kind"]=="member":
+				if mref is not None:
+					return None
+				else:
+					mref = oref
+		return mref
+
+	def lookForSingleVariableExpression(self,rhsOffsetrefs):
+		
+		vref = None
+		for oref in rhsOffsetrefs:
+			if oref["kind"]=="global" or oref["kind"]=="local" or oref["kind"]=="parm" or \
+					oref["kind"]=="unary" or oref["kind"]=="array" or oref["kind"]=="member":
+				if vref is not None:
+					return None
+				else:
+					vref = oref
+		return vref
+
+	def hasVoidPtrMembers(self,T):
+
+		for r in T["refs"]:
+			if r in self.ptr_to_void_type:
+				return True
+		return False
+
+
+	"""
+	Looks in dereference expressions for assignments directly from member expression from void* members
+	Returns the list of the following items (T,TPD,R,MT,LT,E):
+	  T: type of the structure to which member expression was applied on the RHS
+	  TPD: if the structure type T was used through the typedef'ed type this is the original typedef type otherwise it is None
+	  R: refname of the member on the RHS
+	  MT: type of the member on the RHS
+	  LT: type of the variable on the LHS
+	  E: text of the full assignment expression
+	Example:
+	  struct A { void* p; };
+	  struct U* u;
+	  struct A obA;
+	  u = obA.p;
+	"""
+	def findAssignFromVoidPtrMembers(self,report_errors=False):
+
+		assign_count = 0
+		assign_from_ME_count = 0
+		ptr_to_void_member_count = 0
+		ptrvL = list()
+		F = self.db["funcs"]
+		for f in F:
+			for D in f["derefs"]:
+				if D["kind"]=="assign" and D["offset"]==21:
+					assign_count+=1
+					# Handle LHS
+					lhs = D["offsetrefs"][0]
+					if lhs["kind"]=="global":
+						tp = self.grefmap[lhs["id"]]["type"]
+					elif lhs["kind"]=="local" or lhs["kind"]=="parm":
+						tp = f["locals"][lhs["id"]]["type"]
+					elif lhs["kind"]=="unary":
+						tp = lhs["cast"]
+					elif lhs["kind"]=="array":
+						tp = lhs["cast"]
+					elif lhs["kind"]=="member":
+						if len(f["derefs"])<=lhs["id"]:
+							if self.report_errors or report_errors:
+								print "WARNING: Missing deref entry referenced at LHS of assignment (need to check DBJSON)"
+								print json.dumps(f["derefs"],indent=4)
+							continue
+						ME = f["derefs"][lhs["id"]]
+						T = self.resolve_record_type(self.refmap[ME["type"][-1]])
+						if T["class"]!="record":
+							print "ERROR: Invalid structure type in member expression type"
+							print json.dumps(self.refmap[ME["type"][-1]],indent=4)
+							sys.exit(1)
+						n = ME["member"][-1]
+						tp = T["refs"][n]
+					else:
+						print "ERROR: Unhandled case on the LHS of assignment"
+						print json.dumps(f["derefs"],indent=4)
+						sys.exit(1)
+					if len(D["offsetrefs"])<2:
+						if self.report_errors or report_errors:
+							print "WARNING: Missing RHS of an assignment (need to check DBJSON)"
+							print json.dumps(D,indent=4)
+						continue
+					# Now check the RHS
+					# We will look for exactly one member expression on the RHS
+					rhs = self.lookForSingleMemberExpr(D["offsetrefs"][1:])
+					if rhs is not None:
+						if len(f["derefs"])<=rhs["id"]:
+							if self.report_errors or report_errors:
+								print "WARNING: Missing deref entry referenced at RHS of assignment (need to check DBJSON)"
+								print json.dumps(f["derefs"],indent=4)
+							continue
+						ME = f["derefs"][rhs["id"]]
+						assign_from_ME_count+=1
+						T = self.resolve_record_type(self.refmap[ME["type"][-1]])
+						TPD = self.resolve_record_typedef(self.refmap[ME["type"][-1]])
+						if T["class"]!="record":
+							print "ERROR: Invalid structure type in member expression type"
+							print json.dumps(self.refmap[ME["type"][-1]],indent=4)
+							sys.exit(1)
+						n = ME["member"][-1]
+						MT = self.refmap[T["refs"][n]]
+						if MT["id"] in self.ptr_to_void_type:
+							ptr_to_void_member_count+=1
+							ptrvL.append((T,TPD,T["refnames"][n],MT,self.refmap[tp],D["expr"]))
+
+		return ptrvL
+
+		"""
+	Looks in dereference expressions for assignments directly to void* member expression members
+	Returns the list of the following items (T,TPD,R,MT,LT,E):
+	  T: type of the structure to which member expression was applied on the LHS
+	  TPD: if the structure type T was used through the typedef'ed type this is the original typedef type otherwise it is None
+	  R: refname of the member on the LHS
+	  MT: type of the member on the LHS
+	  LT: type of the variable on the RHS
+	  E: text of the full assignment expression
+	Example:
+	  struct A { void* p; };
+	  struct U* u;
+	  struct A obA;
+	  obA.p = u;
+	"""
+	def findAssignToVoidPtrMembers(self,report_errors=False):
+
+		assign_count = 0
+		assign_to_ME_count = 0
+		ptr_to_void_member_count = 0
+		ptrvL = list()
+		F = self.db["funcs"]
+		for f in F:
+			for D in f["derefs"]:
+				if D["kind"]=="assign" and D["offset"]==21:
+					assign_count+=1
+					# Handle RHS first
+					if len(D["offsetrefs"])<2:
+						if self.report_errors or report_errors:
+							print "WARNING: Missing RHS of an assignment (need to check DBJSON)"
+							print json.dumps(D,indent=4)
+						continue
+					# We will look for exactly one variable expression on the RHS
+					rhs = self.lookForSingleVariableExpression(D["offsetrefs"][1:])
+					if rhs is not None:
+						if rhs["kind"]=="global":
+							tp = self.grefmap[rhs["id"]]["type"]
+						elif rhs["kind"]=="local" or rhs["kind"]=="parm":
+							tp = f["locals"][rhs["id"]]["type"]
+						elif rhs["kind"]=="unary" or rhs["kind"]=="array" or rhs["kind"]=="member":
+							if "cast" not in rhs:
+								if self.report_errors or report_errors:
+									print "WARNING: Missing cast information on member expression in offsetrefs (need to check DBJSON)"
+									print D["expr"]
+									print json.dumps(rhs,indent=4)
+								continue
+							tp = rhs["cast"]
+						# Now handle LHS
+						lhs = D["offsetrefs"][0]
+						if lhs["kind"]!="member":
+							# We only care about the member assignments
+							continue
+						else:
+							if len(f["derefs"])<=lhs["id"]:
+								if self.report_errors or report_errors:
+									print "WARNING: Missing deref entry referenced at LHS of assignment (need to check DBJSON)"
+									print json.dumps(f["derefs"],indent=4)
+								continue
+						ME = f["derefs"][lhs["id"]]
+						assign_to_ME_count+=1
+						T = self.resolve_record_type(self.refmap[ME["type"][-1]])
+						TPD = self.resolve_record_typedef(self.refmap[ME["type"][-1]])
+						if T["class"]!="record":
+							print "ERROR: Invalid structure type in member expression type"
+							print json.dumps(self.refmap[ME["type"][-1]],indent=4)
+							sys.exit(1)
+						n = ME["member"][-1]
+						MT = self.refmap[T["refs"][n]]
+						if MT["id"] in self.ptr_to_void_type:
+							ptr_to_void_member_count+=1
+							ptrvL.append((T,TPD,T["refnames"][n],MT,self.refmap[tp],D["expr"]))
+		return ptrvL
+
+	"""
+	Looks in dereference expressions for initialization that comes directly from member expression from void* members
+	Returns the list of the following items (T,TPD,R,MT,LT,E):
+	  T: type of the structure to which member expression was applied on the RHS
+	  TPD: if the structure type T was used through the typedef'ed type this is the original typedef type otherwise it is None
+	  R: refname of the member on the RHS
+	  MT: type of the member on the RHS
+	  LT: type of the variable being initialized
+	  E: text of the full initialization expression
+	Example:
+	  struct A { void* p; };
+	  struct U* u = obA.p;
+	"""
+	def findInitFromVoidPtrMembers(self,report_errors=False):
+
+		init_count = 0
+		init_from_ME_count = 0
+		ptr_to_void_member_count = 0
+		ptrvL = list()
+		F = self.db["funcs"]
+		for f in F:
+			for D in f["derefs"]:
+				if D["kind"]=="init":
+					init_count+=1
+					# The variable being initialized
+					lhs = D["offsetrefs"][0]
+					if lhs["kind"]=="global":
+						tp = self.grefmap[lhs["id"]]["type"]
+					elif lhs["kind"]=="local":
+						tp = f["locals"][lhs["id"]]["type"]
+					else:
+						print "ERROR: Unhandled case on the LHS of initialization"
+						print json.dumps(f["derefs"],indent=4)
+						sys.exit(1)
+					if len(D["offsetrefs"])<2:
+						if self.report_errors or report_errors:
+							print "WARNING: Missing RHS of the initialization (need to check DBJSON)"
+							print json.dumps(D,indent=4)
+						continue
+					# Now check the RHS
+					# We will look for exactly one member expression on the RHS
+					rhs = self.lookForSingleMemberExpr(D["offsetrefs"][1:])
+					if rhs is not None:
+						if len(f["derefs"])<=rhs["id"]:
+							if self.report_errors or report_errors:
+								print "WARNING: Missing deref entry referenced at RHS of assignment (need to check DBJSON)"
+								print json.dumps(f["derefs"],indent=4)
+							continue
+						ME = f["derefs"][rhs["id"]]
+						init_from_ME_count+=1
+						T = self.resolve_record_type(self.refmap[ME["type"][-1]])
+						TPD = self.resolve_record_typedef(self.refmap[ME["type"][-1]])
+						if T["class"]!="record":
+							print "ERROR: Invalid structure type in member expression type"
+							print json.dumps(self.refmap[ME["type"][-1]],indent=4)
+							sys.exit(1)
+						n = ME["member"][-1]
+						MT = self.refmap[T["refs"][n]]
+						if MT["id"] in self.ptr_to_void_type:
+							ptr_to_void_member_count+=1
+							ptrvL.append((T,TPD,T["refnames"][n],MT,self.refmap[tp],D["expr"]))
+
+		return ptrvL
+
+	"""
+	Looks in dereference expressions for the initialization of record types through the initializer list
+	Returns the list of the following items (T,TPD,N,E):
+	  T: type of the structure to which the initialization was applied on the LHS
+	  TPD: if the structure type T was used through the typedef'ed type this is the original typedef type otherwise it is None
+	  N: number of initialized elements through the initializer list
+	  E: text of the full initialization expression
+	Example:
+	  struct A { void* p; };
+	  struct A obA = {};
+	"""
+	def findInitForRecordTypes(self,report_errors=False):
+
+		init_count = 0
+		rinitL = list()
+		F = self.db["funcs"]
+		for f in F:
+			for D in f["derefs"]:
+				if D["kind"]=="init":
+					init_count+=1
+					# The variable being initialized
+					lhs = D["offsetrefs"][0]
+					if lhs["kind"]=="global":
+						tp = self.grefmap[lhs["id"]]["type"]
+					elif lhs["kind"]=="local":
+						tp = f["locals"][lhs["id"]]["type"]
+					else:
+						print "ERROR: Unhandled case on the LHS of initialization"
+						print json.dumps(f["derefs"],indent=4)
+						sys.exit(1)
+					T = self.refmap[tp]
+					TPD = None
+					if T["class"]=="typedef":
+						TPD = T
+						T = self.walkTPD(T)
+					if T["class"]=="record":
+						rinitL.append((T,TPD,D["offset"],D["expr"]))
+		return rinitL
+
+	"""
+	Looks into return expressions for functions that return void* and tracks the type of single returned variable expression
+	Returns the list of the following items (F,T,E):
+	  F: function id where this return expression was used
+	  T: type of the return expression
+	  E: text of the full return expression
+	Example:
+	  struct A { char* s; };
+	  void* fun(void) {
+		unsigned long ul = 0;
+		unsigned long* pul = &ul;
+		return pul;
+	  }
+	"""
+	def findVoidPtrReturnFromFunctions(self,report_errors=False):
+
+		voidptr_return_fun_count = 0
+		return_count = 0
+		retL = list()
+		F = self.db["funcs"]
+		for f in F:
+			if f["types"][0] not in self.ptr_to_void_type:
+				continue
+			voidptr_return_fun_count+=1
+			for D in f["derefs"]:
+				if D["kind"]=="return":
+					return_count+=1
+					# We will look for exactly one variable expression in the return expression
+					rexpr = self.lookForSingleVariableExpression(D["offsetrefs"])
+					if rexpr is not None:
+						if rexpr["kind"]=="global":
+							tp = self.grefmap[rexpr["id"]]["type"]
+						elif rexpr["kind"]=="local" or rexpr["kind"]=="parm":
+							tp = f["locals"][rexpr["id"]]["type"]
+						elif rexpr["kind"]=="unary" or rexpr["kind"]=="array" or rexpr["kind"]=="member":
+							if "cast" not in rexpr:
+								if self.report_errors or report_errors:
+									print "WARNING: Missing cast information on member expression in offsetrefs (need to check DBJSON)"
+									print D["expr"]
+									print json.dumps(rexpr,indent=4)
+								continue
+							tp = rexpr["cast"]
+						retL.append((f["id"],self.refmap[tp],D["expr"].strip()))
+		return retL
+
+	"""
+	Looks into return expression for functions and tracks single member expression with void* type
+	Returns the list of the following items (F,T,TPD,R,MT,RT,E):
+	  F: function id where this return expression was used
+	  T: type of the structure to which member expression was applied in the return expression
+	  TPD: if the structure type T was used through the typedef'ed type this is the original typedef type otherwise it is None
+	  R: refname of the member in the return expression
+	  MT: type of the member in the return expression
+	  RT: return type of this function
+	  E: text of the full return expression
+	Example:
+	  struct A { void* p; };
+	  unsigned long* fun(void) {
+		struct A* pA;
+		(...)
+		return pA->p;
+	  }
+	"""
+	def findFunctionReturnFromVoidPtrMembers(self,report_errors=False):
+
+		return_count = 0
+		return_with_ME_count = 0
+		retL = list()
+		F = self.db["funcs"]
+		for f in F:
+			for D in f["derefs"]:
+				if D["kind"]=="return":
+					return_count+=1
+					# We will look for exactly one member expression in the return expression
+					rexpr = self.lookForSingleMemberExpr(D["offsetrefs"])
+					if rexpr is not None:
+						if len(f["derefs"])<=rexpr["id"]:
+							if self.report_errors or report_errors:
+								print "WARNING: Missing deref entry referenced at return expression (need to check DBJSON)"
+								print json.dumps(f["derefs"],indent=4)
+							continue
+						ME = f["derefs"][rexpr["id"]]
+						return_with_ME_count+=1
+						T = self.resolve_record_type(self.refmap[ME["type"][-1]])
+						TPD = self.resolve_record_typedef(self.refmap[ME["type"][-1]])
+						if T["class"]!="record":
+							print "ERROR: Invalid structure type in member expression type"
+							print json.dumps(self.refmap[ME["type"][-1]],indent=4)
+							sys.exit(1)
+						n = ME["member"][-1]
+						MT = self.refmap[T["refs"][n]]
+						if MT["id"] in self.ptr_to_void_type:
+							retL.append((f["id"],T,TPD,T["refnames"][n],MT,self.refmap[f["types"][0]],D["expr"].strip()))
+		return retL
+
+
+	"""
+	Looks into all void* member expressions in dereference information and notify all casts other than void*
+	Returns the list of the following items (F,T,TPD,R,MT,CT,E):
+	  F: function id where this member expression was used
+	  T: type of the structure to which member expression was applied
+	  TPD: if the structure type T was used through the typedef'ed type this is the original typedef type otherwise it is None
+	  R: refname of the member in the member expression
+	  MT: type of the member in the member expression
+	  CT: the type this member expression was casted to
+	  E: text of the full return expression
+	Example:
+	  struct A { void* p; };
+	  struct A obA;
+	  (struct B*)obA.p;
+	  }
+	"""
+	def findMemberExprCasts(self,report_errors=False):
+
+		castMeL = list()
+		F = self.db["funcs"]
+		for f in F:
+			for D in f["derefs"]:
+				for oref in D["offsetrefs"]:
+					if oref["kind"]=="member":
+						if len(f["derefs"])<=oref["id"]:
+							if self.report_errors or report_errors:
+								print "WARNING: Missing deref entry referenced at return expression (need to check DBJSON)"
+								print json.dumps(f["derefs"],indent=4)
+							continue
+						ME = f["derefs"][oref["id"]]
+						if "cast" in oref and oref["cast"] not in self.ptr_to_void_type:
+							T = self.resolve_record_type(self.refmap[ME["type"][-1]])
+							TPD = self.resolve_record_typedef(self.refmap[ME["type"][-1]])
+							if T["class"]!="record":
+									print "ERROR: Invalid structure type in member expression type"
+									print json.dumps(self.refmap[ME["type"][-1]],indent=4)
+									sys.exit(1)
+							n = ME["member"][-1]
+							MT = self.refmap[T["refs"][n]]
+							if MT["id"] in self.ptr_to_void_type:
+								castMeL.append((f["id"],T,TPD,T["refnames"][n],MT,self.refmap[oref["cast"]],D["expr"]))
+		return castMeL
+
+
+	"""
+	Looks into all unary dereference expressions and tracks the usage of member expressions at its base (for single member expressions only)
+	For each such expression looks if the dereference offset is non-zero or other variable expressions at used in the dereference expressions
+	Returns the list of the following items (F,T,TPD,R,MT,off,n,E):
+	  F: function id where this unary dereference expression was used
+	  T: type of the structure to which member expression at the base of unary expression was applied
+	  TPD: if the structure type T was used through the typedef'ed type this is the original typedef type otherwise it is None
+	  R: refname of the member in the member expression at the base of unary expression was applied
+	  MT: type of the member in the member expression at the base of unary expression was applied
+	  off: dereference offset used in the dereference expression
+	  n: number of other variable expressions used in the dereference expression (other than member expression)
+	  E: text of the unary dereference expression
+	Example:
+      struct B;
+	  struct A { struct B* p; };
+	  struct A obA;
+	  *(obA.p+2);
+	  }
+	"""
+	def findDerefsOnMemberExprs(self,report_errors=False):
+
+		derefL = list()
+		F = self.db["funcs"]
+		for f in F:
+			for D in f["derefs"]:
+				if D["kind"]=="unary":
+					# We will look for exactly one member expression in the dereference expression
+					bexpr = self.lookForSingleMemberExpr(D["offsetrefs"])
+					if bexpr is not None:
+						if len(f["derefs"])<=bexpr["id"]:
+							if self.report_errors or report_errors:
+								print "WARNING: Missing deref entry referenced at return expression (need to check DBJSON)"
+								print json.dumps(f["derefs"],indent=4)
+							continue
+						ME = f["derefs"][bexpr["id"]]
+						T = self.resolve_record_type(self.refmap[ME["type"][-1]])
+						TPD = self.resolve_record_typedef(self.refmap[ME["type"][-1]])
+						if T["class"]!="record":
+							print "ERROR: Invalid structure type in member expression type"
+							print json.dumps(self.refmap[ME["type"][-1]],indent=4)
+							sys.exit(1)
+						n = ME["member"][-1]
+						MT = self.refmap[T["refs"][n]]
+						derefL.append((f["id"],T,TPD,T["refnames"][n],MT,D["offset"],len(D["offsetrefs"])-1,D["expr"]))
+		return derefL
+
+
+	def nonVoidPtrTypes(self,Ts):
+
+		return [x for x in Ts if x not in self.ptr_to_void_type]
+
+	def voidPtrMemberUsageSummary(self,ptrvL,debug=False):
+
+		ptrvmap = {}
+		ptrvmapd = {}
+		for TT in ptrvL:
+			s = ""
+			if TT[1] is not None:
+				s+=TT[1]["name"]
+			else:
+				s+="struct %s"%(TT[0]["str"])
+			s+=":%s"%(TT[2])
+			if s in ptrvmap:
+				ptrvmap[s].add(TT[4]["id"])
+			else:
+				ptrvmap[s] = set([TT[4]["id"]])
+			if s in ptrvmapd:
+				ptrvmapd[s].append(TT[5])
+			else:
+				ptrvmapd[s] = [TT[5]]
+
+		print "Detected void* member usage: %d"%(len(ptrvmap))
+		print "Assignment to at most one struct* type: %d"%(len([x for x in ptrvmap.values() if len(self.nonVoidPtrTypes(x))<=1]))
+		exprs = set()
+		for k,v in ptrvmap.iteritems():
+			tabn=""
+			if len(self.nonVoidPtrTypes(v))>1:
+				tabn="      "
+			print "%s%s: [%s]"%(tabn,k," ".join(["%s(%s)"%(DI.type_abbrev(x),str(x)) for x in list(v)]))
+			for e in ptrvmapd[k]:
+				E = "  { %s }"%(e)
+				if E not in exprs:
+					if debug:
+						print E
+					exprs.add(E)
+
+	def recordInitSummary(self,rinitL,debug=False):
+
+		rmap = {}
+		rmapd = {}
+		rmapT = {}
+		for TT in rinitL:
+			s = ""
+			if TT[1] is not None:
+				s+=TT[1]["name"]
+			else:
+				s+="struct %s"%(TT[0]["str"])
+			s+=":%s"%(TT[2])
+			if s in rmap:
+				rmap[s].add(TT[2])
+			else:
+				rmap[s] = set([TT[2]])
+			if s in rmapd:
+				rmapd[s].append(TT[3])
+			else:
+				rmapd[s] = [TT[3]]
+			if TT[0]["id"] in rmapT:
+				rmapT[TT[0]["id"]].add(TT[2])
+			else:
+				rmapT[TT[0]["id"]] = set([TT[2]])
+
+		print "Detected record type initializations: %d"%(len(rmap))
+		print "Number of empty initializations for record types: %d"%(len([x for x in rmap.values() if len(x)==1 and list(x)[0]==0]))
+		print "Initializations for record types with at least one void* member: %d"%(len([TT[0] for TT in rinitL if self.hasVoidPtrMembers(TT[0])]))
+		print "Number of empty initializations for record types with at least one void* member: %d"%(
+			len([u for u in [self.refmap[k] for k,v in rmapT.iteritems() if len(v)==1 and list(v)[0]==0] if self.hasVoidPtrMembers(u)]) )
+
+		exprs = set()
+		for k,v in rmap.iteritems():
+			tabn=""
+			if len(v)>1 or (len(v)==1 and list(v)[0]!=0):
+				tabn="      "
+			print "%s%s: [%s]"%(tabn,k," ".join([str(x) for x in v]))
+			for e in rmapd[k]:
+				E = "  { %s }"%(e)
+				if E not in exprs:
+					if debug:
+						print E
+					exprs.add(E)
+
+	def VoidPtrReturnFromFunctionsSummary(self,retL,debug=False):
+
+		fmap = {}
+		fmapd = {}
+		for TT in retL:
+			if TT[0] in fmap:
+				fmap[TT[0]].add(TT[1]["id"])
+			else:
+				fmap[TT[0]] = set([TT[1]["id"]])
+			if TT[0] in fmapd:
+				fmapd[TT[0]].append(TT[2])
+			else:
+				fmapd[TT[0]] = [TT[2]]
+
+		print "Detected functions which return void*: %d"%(len(fmap))
+
+		exprs = set()
+		for f,v in fmap.iteritems():
+			tabn=""
+			if len(self.nonVoidPtrTypes(v))>1:
+				tabn="      "
+			print "%s%s(): [%s]"%(tabn,self.frefmap[f]["name"]," ".join(["%s(%s)"%(DI.type_abbrev(x),str(x)) for x in list(v)]))
+			for e in fmapd[f]:
+				E = "  { %s }"%(e)
+				if E not in exprs:
+					if debug:
+						print E
+					exprs.add(E)
+
+
+	def FunctionReturnFromVoidPtrMembersSummary(self,retL,debug=False):
+
+		ptrvmap = {}
+		ptrvmapd = {}
+		for TT in retL:
+			s = ""
+			if TT[2] is not None:
+				s+=TT[2]["name"]
+			else:
+				s+="struct %s"%(TT[1]["str"])
+			s+=":%s"%(TT[3])
+			if s in ptrvmap:
+				ptrvmap[s].add(TT[5]["id"])
+			else:
+				ptrvmap[s] = set([TT[5]["id"]])
+			if s in ptrvmapd:
+				ptrvmapd[s].append("@ %s(): "%(self.frefmap[TT[0]]["name"])+TT[6])
+			else:
+				ptrvmapd[s] = ["@ %s(): "%(self.frefmap[TT[0]]["name"])+TT[6]]
+
+		print "Detected void* member returns: %d"%(len(ptrvmap))
+		print "Return conversion to at most one struct* type: %d"%(len([x for x in ptrvmap.values() if len(self.nonVoidPtrTypes(x))<=1]))
+		exprs = set()
+		for k,v in ptrvmap.iteritems():
+			tabn=""
+			if len(self.nonVoidPtrTypes(v))>1:
+				tabn="      "
+			print "%s%s: [%s]"%(tabn,k," ".join(["%s(%s)"%(DI.type_abbrev(x),str(x)) for x in list(v)]))
+			for e in ptrvmapd[k]:
+				E = "  { %s }"%(e)
+				if E not in exprs:
+					if debug:
+						print E
+					exprs.add(E)
+
+	def MemberExprCastsSummary(self,castMeL,debug=False):
+
+		ptrvmap = {}
+		ptrvmapd = {}
+		for TT in castMeL:
+			s = ""
+			if TT[2] is not None:
+				s+=TT[2]["name"]
+			else:
+				s+="struct %s"%(TT[1]["str"])
+			s+=":%s"%(TT[3])
+			if s in ptrvmap:
+				ptrvmap[s].add(TT[5]["id"])
+			else:
+				ptrvmap[s] = set([TT[5]["id"]])
+			if s in ptrvmapd:
+				ptrvmapd[s].append("@ %s(): "%(self.frefmap[TT[0]]["name"])+TT[6])
+			else:
+				ptrvmapd[s] = ["@ %s(): "%(self.frefmap[TT[0]]["name"])+TT[6]]
+
+		print "Detected void* member casts: %d"%(len(ptrvmap))
+		print "Cast to at most one struct* type: %d"%(len([x for x in ptrvmap.values() if len(self.nonVoidPtrTypes(x))<=1]))
+		exprs = set()
+		for k,v in ptrvmap.iteritems():
+			tabn=""
+			if len(self.nonVoidPtrTypes(v))>1:
+				tabn="      "
+			print "%s%s: [%s]"%(tabn,k," ".join(["%s(%s)"%(DI.type_abbrev(x),str(x)) for x in list(v)]))
+			for e in ptrvmapd[k]:
+				E = "  { %s }"%(e)
+				if E not in exprs:
+					if debug:
+						print E
+					exprs.add(E)
+
+	def DerefsOnMemberExprsSummary(self,derefL,debug=False):
+
+		ptrvmap = {}
+		ptrvmapd = {}
+		for TT in derefL:
+			s = ""
+			if TT[2] is not None:
+				s+=TT[2]["name"]
+			else:
+				s+="struct %s"%(TT[1]["str"])
+			s+=":%s"%(TT[3])
+			if s in ptrvmap:
+				ptrvmap[s].append((TT[5],TT[6],TT[4]["id"]))
+			else:
+				ptrvmap[s] = [(TT[5],TT[6],TT[4]["id"])]
+			if s in ptrvmapd:
+				ptrvmapd[s].append("@ %s(): "%(self.frefmap[TT[0]]["name"])+TT[7])
+			else:
+				ptrvmapd[s] = ["@ %s(): "%(self.frefmap[TT[0]]["name"])+TT[7]]
+
+		print "Detected dererence expressions on distinct types: %d"%(len(ptrvmap))
+		print "Detected dererence expressions on distinct types with non-zero offset: %d"%(
+			len([True for k,v in ptrvmap.iteritems() if len([(x[0],x[1]) for x in v if x[0]+x[1]>0])>0]))
+		exprs = set()
+		for k,v in ptrvmap.iteritems():
+			nm = [(x[0],x[1]) for x in v if x[0]+x[1]>0]
+			tabn=""
+			if len(nm)>0:
+				tabn="@ "
+				print "%s%s: [%s]"%(tabn,k," ".join(["[%d,%d,%s]"%(x[0],x[1],DI.type_abbrev(x[2])) for x in v]))
+				for e in ptrvmapd[k]:
+					E = "  { %s }"%(e)
+					if E not in exprs:
+						if debug:
+							print E
+						exprs.add(E)
+
+
+DI = DerefInfo()
+#ptrvL = DI.findAssignFromVoidPtrMembers()
+#ptrvL = DI.findInitFromVoidPtrMembers(False)
+#ptrvL = DI.findAssignToVoidPtrMembers(False)
+#DI.voidPtrMemberUsageSummary(ptrvL,True)
+
+#rinitL = DI.findInitForRecordTypes(False) # Will not work well until we'll have proper initialization for each member in DBJSON
+#DI.recordInitSummary(rinitL,True)
+
+#retL = DI.findVoidPtrReturnFromFunctions(False)
+#DI.VoidPtrReturnFromFunctionsSummary(retL,True)
+
+#retL = DI.findFunctionReturnFromVoidPtrMembers(False)
+#DI.FunctionReturnFromVoidPtrMembersSummary(retL,True)
+
+#castMeL = DI.findMemberExprCasts(False)
+#DI.MemberExprCastsSummary(castMeL,True)
+
+derefL = DI.findDerefsOnMemberExprs(False)
+DI.DerefsOnMemberExprsSummary(derefL,True)
