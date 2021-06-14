@@ -1103,6 +1103,75 @@ static int kflat_fpointer_test(struct kflat *kflat, int debug_flag) {
 
 }
 
+struct paddingA {
+	int i;
+};
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(paddingA,
+);
+
+struct paddingB {
+	char c;
+} __attribute__((aligned(sizeof(long))));;
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(paddingB,
+	STRUCT_ALIGN(sizeof(long));
+);
+
+struct paddingC {
+	char c;
+};
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(paddingC,
+);
+
+struct paddingRoot {
+	struct paddingA* a0;
+	struct paddingB* b;
+	struct paddingA* a1;
+	struct paddingC* c;
+};
+
+FUNCTION_DEFINE_FLATTEN_STRUCT(paddingRoot,
+	AGGREGATE_FLATTEN_STRUCT(paddingA,a0);
+	AGGREGATE_FLATTEN_STRUCT(paddingB,b);
+	AGGREGATE_FLATTEN_STRUCT(paddingA,a1);
+	AGGREGATE_FLATTEN_STRUCT(paddingC,c);
+);
+
+static int kflat_padding_test(struct kflat *kflat, int debug_flag) {
+
+	int err = 0;
+
+	struct paddingA a0;
+	struct paddingB b;
+	struct paddingA a1;
+	struct paddingC c;
+
+	struct paddingRoot r = {&a0,&b,&a1,&c};
+
+	flat_infos("a0: %lx [%zu]\n",&a0,sizeof(struct paddingA));
+	flat_infos("b: %lx [%zu]\n",&b,sizeof(struct paddingB));
+	flat_infos("a1: %lx [%zu]\n",&a1,sizeof(struct paddingA));
+	flat_infos("c: %lx [%zu]\n",&c,sizeof(struct paddingC));
+
+	flatten_init(kflat);
+	flatten_set_debug_flag(kflat,debug_flag);
+
+	FOR_ROOT_POINTER(&r,
+		FLATTEN_STRUCT(paddingRoot,&r);
+	);
+
+	flat_infos("@Flatten done: %d\n",kflat->errno);
+	if (!kflat->errno) {
+		err = flatten_write(kflat);
+	}
+	flatten_fini(kflat);
+
+	return err;
+
+}
+
 struct CC {
 	int i;
 };
@@ -1266,6 +1335,7 @@ enum KFLAT_TEST_CASE {
 	STRINGSETARG=17<<2,
 	GLOBALCHECK=19<<2,
 	GLOBALTRIGGER=20<<2,
+	PADDING=21<<2,
 };
 
 #include "kflat_test_data.h"
@@ -1385,6 +1455,11 @@ int kflat_ioctl_test(struct kflat *kflat, unsigned int cmd, unsigned long arg) {
 
 	if ((arg&(~0x3))==FPOINTER) {
 		err = kflat_fpointer_test(kflat,arg&0x01);
+		if (err) return err;
+	}
+
+	if ((arg&(~0x3))==PADDING) {
+		err = kflat_padding_test(kflat,arg&0x01);
 		if (err) return err;
 	}
 

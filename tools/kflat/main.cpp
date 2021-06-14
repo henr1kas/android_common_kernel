@@ -12,38 +12,39 @@
 #if 0
 #include "aot.h"
 #else
+
 #ifdef __linux__
-#define _ALIGNAS(n)	__attribute__((aligned(n)))
-#define RB_NODE_ALIGN	(sizeof(long))
+  #define _ALIGNAS(n)	__attribute__((aligned(n)))
+  #define RB_NODE_ALIGN	(sizeof(long))
 #else
 #ifdef _WIN32
-#define _ALIGNAS(n)	__declspec(align(n))
-#ifdef _M_IX86
-#define RB_NODE_ALIGN	4
-#elif defined _M_X64
-#define RB_NODE_ALIGN	8
-#endif
+  #define _ALIGNAS(n)	__declspec(align(n))
+  #ifdef _M_IX86
+    #define RB_NODE_ALIGN	4
+  #elif defined _M_X64
+    #define RB_NODE_ALIGN	8
+  #endif
 #endif	/* _WIN32 */
 #endif /* __linux__ */
 
 #ifdef __linux__
-#include <alloca.h>
-#define ALLOCA(x)	alloca(x)
+  #include <alloca.h>
+  #define ALLOCA(x)	alloca(x)
 #else
-#ifdef _WIN32
-#include <malloc.h>
-#define ALLOCA(x)	_malloca(x)
-#endif
+  #ifdef _WIN32
+    #include <malloc.h>
+    #define ALLOCA(x)	_malloca(x)
+  #endif
 #endif
 
 #ifdef __linux__
-#define container_of(ptr, type, member) ({			\
-	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
-	(type *)( (char *)__mptr - offsetof(type,member) );})
+  #define container_of(ptr, type, member) ({			\
+  	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+  	(type *)( (char *)__mptr - offsetof(type,member) );})
 #else
-#ifdef _WIN32
-#define container_of(ptr, type, member) (type *)( (char *)(ptr) - offsetof(type,member) )
-#endif
+  #ifdef _WIN32
+    #define container_of(ptr, type, member) (type *)( (char *)(ptr) - offsetof(type,member) )
+  #endif
 #endif
 
 typedef uintptr_t (*get_function_address_t)(const char* fsym);

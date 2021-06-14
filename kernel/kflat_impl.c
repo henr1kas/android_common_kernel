@@ -384,8 +384,11 @@ int binary_stream_calculate_index(struct kflat* kflat) {
 	size_t index=0;
     while(p) {
     	struct blstream* cp = p;
+#if 0
     	size_t align=0;
+#endif
     	p = p->next;
+#if 0
     	if (cp->alignment) {
     		struct blstream* v;
     		unsigned char* padding = kflat_zalloc(kflat,cp->alignment,1);
@@ -404,6 +407,7 @@ int binary_stream_calculate_index(struct kflat* kflat) {
     		v->index = index;
     		index+=v->size;
     	}
+#endif
 
     	cp->index = index;
     	index+=cp->size;
@@ -422,8 +426,12 @@ void binary_stream_destroy(struct kflat* kflat) {
 }
 
 static void binary_stream_element_print(struct blstream* p) {
+	flat_infos("(%zu)(%zu)[%zu]{%lx}[...]\n",p->index,p->alignment,p->size,(unsigned long)p);
+}
+
+void binary_stream_element_print_data(struct blstream* p) {
 	size_t i;
-	flat_infos("(%zu)(%zu){%zu}{%lx}[ ",p->index,p->alignment,p->size,(unsigned long)p);
+	flat_infos("(%zu)(%zu)[%zu]{%lx}[ ",p->index,p->alignment,p->size,(unsigned long)p);
 	for (i=0; i<p->size; ++i) {
 		flat_infos("%02x ",((unsigned char*)(p->data))[i]);
 	}
@@ -739,6 +747,7 @@ int fixup_set_update(struct kflat* kflat, struct flat_node* node, size_t offset,
 	}
 
 	inode->ptr = ptr;
+
 	return 0;
 }
 
@@ -766,29 +775,14 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 	inode = fixup_set_search(kflat,node->start+offset);
 
 	if (inode && inode->inode) {
-		//uintptr_t inode_start;
-		//uintptr_t inode_offset;
-		//uintptr_t ptr_start;
-		//uintptr_t ptr_offset;
 		uintptr_t inode_ptr;
-
-		//DBGS("fixup_set_insert(...): inode: 0x%lx, inode->inode: 0x%lx\n",inode,inode->inode);
 		if (((unsigned long)inode->ptr)&1) {
 			inode_ptr = ((unsigned long)inode->ptr)&(~1);
 		}
 		else {
 			inode_ptr = inode->ptr->node->start + inode->ptr->offset;
 		}
-		//inode_start = ((struct flatten_pointer*)(((unsigned long)inode->ptr)&(~1)))->node->start;
-		//DBGS("fixup_set_insert(...): inode_start: 0x%lx\n",inode_start);
-		//inode_offset = inode->ptr->offset;
-		//DBGS("fixup_set_insert(...): inode_offset: 0x%lx\n",inode_offset);
-		//ptr_start = ptr->node->start;
-		//DBGS("fixup_set_insert(...): ptr_start: 0x%lx\n",ptr_start);
-		//ptr_offset = ptr->offset;
-		//DBGS("fixup_set_insert(...): ptr_offset: 0x%lx\n",ptr_offset);
 		if (inode_ptr!=ptr->node->start+ptr->offset) {
-		//if ((inode_start+inode_offset)!=(ptr_start+ptr_offset)) {
 			flat_errs("fixup_set_insert(...): multiple pointer mismatch for the same storage [%d]: (%lx vs %lx)\n",
 					((unsigned long)inode->ptr)&1,inode_ptr,ptr->node->start+ptr->offset);
 			kflat_free(ptr);
@@ -832,6 +826,7 @@ int fixup_set_insert(struct kflat* kflat, struct flat_node* node, size_t offset,
 	rb_insert_color(&data->node, &kflat->FLCTRL.fixup_set_root.rb_root);
 
 	DBG("fixup_set_insert(...): 0\n");
+
 	return 0;
 }
 EXPORT_SYMBOL(fixup_set_insert);
@@ -911,6 +906,7 @@ int fixup_set_insert_force_update(struct kflat* kflat, struct flat_node* node, s
 	rb_insert_color(&data->node, &kflat->FLCTRL.fixup_set_root.rb_root);
 
 	DBG("fixup_set_insert_force_update(...): 0\n");
+
 	return 0;
 }
 EXPORT_SYMBOL(fixup_set_insert_force_update);
@@ -1232,9 +1228,32 @@ int root_addr_append(struct kflat* kflat, uintptr_t root_addr) {
     	kflat->FLCTRL.rtail->next = v;
     	kflat->FLCTRL.rtail = kflat->FLCTRL.rtail->next;
     }
+    kflat->FLCTRL.root_addr_count++;
     return 0;
 }
 EXPORT_SYMBOL(root_addr_append);
+
+int root_addr_append_extended(struct kflat* kflat, size_t root_addr, const char* name, size_t size) {
+    struct root_addrnode* v = kflat_zalloc(kflat,sizeof(struct root_addrnode),1);
+    if (!v) {
+    	return ENOMEM;
+    }
+    v->root_addr = root_addr;
+    v->name = name;
+    v->index = kflat->FLCTRL.root_addr_count;
+    v->size = size;
+    if (!kflat->FLCTRL.rhead) {
+    	kflat->FLCTRL.rhead = v;
+    	kflat->FLCTRL.rtail = v;
+    }
+    else {
+    	kflat->FLCTRL.rtail->next = v;
+    	kflat->FLCTRL.rtail = kflat->FLCTRL.rtail->next;
+    }
+    kflat->FLCTRL.root_addr_count++;
+    return 0;
+}
+EXPORT_SYMBOL(root_addr_append_extended);
 
 size_t root_addr_count(struct kflat* kflat) {
 	struct root_addrnode* p = kflat->FLCTRL.rhead;
@@ -1244,6 +1263,30 @@ size_t root_addr_count(struct kflat* kflat) {
     	p = p->next;
     }
     return count;
+}
+
+size_t root_addr_extended_count(struct kflat* kflat) {
+	struct root_addrnode* p = kflat->FLCTRL.rhead;
+	size_t count = 0;
+    while(p) {
+    	if (p->name) {
+    		count++;
+    	}
+    	p = p->next;
+    }
+    return count;
+}
+
+size_t root_addr_extended_size(struct kflat* kflat) {
+	struct root_addrnode* p = kflat->FLCTRL.rhead;
+	size_t size = 0;
+    while(p) {
+    	if (p->name) {
+    		size+=3*sizeof(size_t)+strlen(p->name);
+    	}
+    	p = p->next;
+    }
+    return size;
 }
 
 void interval_tree_print(struct rb_root *root) {
@@ -1452,7 +1495,7 @@ void flatten_init(struct kflat* kflat) {
 }
 
 void flatten_debug_info(struct kflat* kflat) {
-	/*binary_stream_print(kflat);*/
+	binary_stream_print(kflat);
     interval_tree_print(&kflat->FLCTRL.imap_root.rb_root);
     fixup_set_print(kflat);
     mem_fragment_index_debug_print(kflat);
@@ -1464,7 +1507,7 @@ int flatten_write(struct kflat* kflat) {
 	int err;
 
 	if ((err=flatten_write_internal(kflat,&written))==0) {
-		flat_infos("OK. Flatten size: %lu, %lu pointers, %zu root pointers, %lu function pointers, %lu continuous memory fragments,"
+		flat_infos("OK. Flatten size: %lu, %lu pointers, %zu root pointers, %lu function pointers, %lu continuous memory fragments, "
 				"%zu bytes written, memory used: %zu, memory avail: %zu\n",
 			kflat->FLCTRL.HDR.memory_size,kflat->FLCTRL.HDR.ptr_count,kflat->FLCTRL.HDR.root_addr_count,kflat->FLCTRL.HDR.fptr_count,
 			kflat->FLCTRL.HDR.mcount,written-sizeof(size_t),kflat->mptrindex,kflat->msize);
@@ -1502,6 +1545,8 @@ int flatten_write_internal(struct kflat* kflat, size_t* wcounter_p) {
     kflat->FLCTRL.HDR.ptr_count = fixup_set_count(kflat);
     kflat->FLCTRL.HDR.fptr_count = fixup_set_fptr_count(kflat);
     kflat->FLCTRL.HDR.root_addr_count = root_addr_count(kflat);
+    kflat->FLCTRL.HDR.root_addr_extended_count = root_addr_extended_count(kflat);
+    kflat->FLCTRL.HDR.root_addr_extended_size = root_addr_extended_size(kflat);
     kflat->FLCTRL.HDR.this_addr = (uintptr_t)&flatten_base_function_address;
     kflat->FLCTRL.HDR.mcount = mem_fragment_index_count(kflat);
     kflat->FLCTRL.HDR.magic = FLATTEN_MAGIC;
@@ -1517,6 +1562,17 @@ int flatten_write_internal(struct kflat* kflat, size_t* wcounter_p) {
 			root_addr_offset = (size_t)-1;
 		}
 		FLATTEN_WRITE_ONCE(&root_addr_offset,sizeof(size_t),wcounter_p);
+		p = p->next;
+	}
+	p = kflat->FLCTRL.rhead;
+	while(p) {
+		if (p->name) {
+			size_t name_size = strlen(p->name);
+			FLATTEN_WRITE_ONCE(&name_size,sizeof(size_t),wcounter_p);
+			FLATTEN_WRITE_ONCE(p->name,name_size,wcounter_p);
+			FLATTEN_WRITE_ONCE(&p->index,sizeof(size_t),wcounter_p);
+			FLATTEN_WRITE_ONCE(&p->size,sizeof(size_t),wcounter_p);
+		}
 		p = p->next;
 	}
 	if ((err = fixup_set_write(kflat,wcounter_p))!=0) {

@@ -70,6 +70,8 @@ struct flatten_header {
 	size_t ptr_count;
 	size_t fptr_count;
 	size_t root_addr_count;
+	size_t root_addr_extended_count;
+	size_t root_addr_extended_size;
 	uintptr_t this_addr;
 	size_t fptrmapsz;
 	size_t mcount;
@@ -85,6 +87,7 @@ struct FLCONTROL {
 	struct root_addrnode* rhead;
 	struct root_addrnode* rtail;
 	struct root_addrnode* last_accessed_root;
+	size_t root_addr_count;
 	int debug_flag;
 	unsigned long option;
 	void* mem;
@@ -113,6 +116,9 @@ struct fixup_set_node {
 struct root_addrnode {
 	struct root_addrnode* next;
 	uintptr_t root_addr;
+	const char* name;
+	size_t index;
+	size_t size;
 };
 
 struct interval_nodelist {
@@ -290,6 +296,7 @@ int fixup_set_reserve_address(struct kflat* kflat, uintptr_t addr);
 int fixup_set_reserve(struct kflat* kflat, struct flat_node* node, size_t offset);
 int fixup_set_update(struct kflat* kflat, struct flat_node* node, size_t offset, struct flatten_pointer* ptr);
 int root_addr_append(struct kflat* kflat, size_t root_addr);
+int root_addr_append_extended(struct kflat* kflat, size_t root_addr, const char* name, size_t size);
 void* root_pointer_next(void);
 void* root_pointer_seq(size_t index);
 struct blstream* binary_stream_insert_back(struct kflat* kflat, const void* data, size_t size, struct blstream* where);
@@ -4829,6 +4836,26 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE)
 		}	\
 		if (!KFLAT_ACCESSOR->errno) {	\
 			KFLAT_ACCESSOR->errno = root_addr_append(KFLAT_ACCESSOR, (uintptr_t)(p) );	\
+		}	\
+	} while(0)
+
+#define FOR_EXTENDED_ROOT_POINTER(p,__name,__size,...)	\
+	do {	\
+		DBGM3(FOR_EXTENDED_ROOT_POINTER,p,__name,__size);	\
+		if ((!KFLAT_ACCESSOR->errno)&&(ADDR_VALID(p))) {	\
+			struct flatten_pointer* __fptr = make_flatten_pointer(KFLAT_ACCESSOR,0,0);	\
+			flatten_set_option(KFLAT_ACCESSOR,KFLAT_OPTION_IN_PROGRESS);	\
+			if (__fptr) {	\
+				__VA_ARGS__;	\
+				kflat_free(__fptr);	\
+			}	\
+			else {	\
+				KFLAT_ACCESSOR->errno = ENOMEM;	\
+			}	\
+			flatten_clear_option(KFLAT_ACCESSOR,KFLAT_OPTION_IN_PROGRESS);	\
+		}	\
+		if (!KFLAT_ACCESSOR->errno) {	\
+			KFLAT_ACCESSOR->errno = root_addr_append_extended(KFLAT_ACCESSOR, (uintptr_t)(p), __name, __size );	\
 		}	\
 	} while(0)
 
