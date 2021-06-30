@@ -1234,7 +1234,15 @@ int root_addr_append(struct kflat* kflat, uintptr_t root_addr) {
 EXPORT_SYMBOL(root_addr_append);
 
 int root_addr_append_extended(struct kflat* kflat, size_t root_addr, const char* name, size_t size) {
-    struct root_addrnode* v = kflat_zalloc(kflat,sizeof(struct root_addrnode),1);
+
+	struct root_addr_set_node* root_addr_node = root_addr_set_search(kflat, name);
+	struct root_addrnode* v;
+
+	if (root_addr_node) {
+		return EEXIST;
+	}
+
+	v = kflat_zalloc(kflat,sizeof(struct root_addrnode),1);
     if (!v) {
     	return ENOMEM;
     }
@@ -1251,6 +1259,7 @@ int root_addr_append_extended(struct kflat* kflat, size_t root_addr, const char*
     	kflat->FLCTRL.rtail = kflat->FLCTRL.rtail->next;
     }
     kflat->FLCTRL.root_addr_count++;
+    root_addr_set_insert(kflat, name, root_addr);
     return 0;
 }
 EXPORT_SYMBOL(root_addr_append_extended);
@@ -1288,6 +1297,98 @@ size_t root_addr_extended_size(struct kflat* kflat) {
     }
     return size;
 }
+
+struct root_addr_set_node* root_addr_set_search(struct kflat* kflat, const char* name) {
+
+	struct rb_node *node = kflat->root_addr_set.rb_node;
+
+	while (node) {
+		struct root_addr_set_node* data = container_of(node, struct root_addr_set_node, node);
+
+		if (strcmp(name,data->name)<0) {
+			node = node->rb_left;
+		}
+		else if (strcmp(name,data->name)>0) {
+			node = node->rb_right;
+		}
+		else
+			return data;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(root_addr_set_search);
+
+int root_addr_set_insert(struct kflat* kflat, const char* name, uintptr_t v) {
+
+	struct root_addr_set_node* data = libflat_zalloc(1,sizeof(struct root_addr_set_node));
+	struct rb_node **new, *parent = 0;
+	data->name = libflat_zalloc(1,strlen(name)+1);
+	strcpy(data->name,name);
+	data->root_addr = v;
+	new = &(kflat->root_addr_set.rb_node);
+
+	/* Figure out where to put new node */
+	while (*new) {
+		struct root_addr_set_node* this = container_of(*new, struct root_addr_set_node, node);
+
+		parent = *new;
+		if (strcmp(data->name,this->name)<0)
+			new = &((*new)->rb_left);
+		else if (strcmp(data->name,this->name)>0)
+			new = &((*new)->rb_right);
+		else {
+			libflat_free((void*)data->name);
+		    libflat_free(data);
+		    return 0;
+		}
+	}
+
+	/* Add new node and rebalance tree. */
+	rb_link_node(&data->node, parent, new);
+	rb_insert_color(&data->node, &kflat->root_addr_set);
+
+	return 1;
+}
+EXPORT_SYMBOL(root_addr_set_insert);
+
+int root_addr_set_delete(struct kflat* kflat, const char* name) {
+
+	struct root_addr_set_node* node = root_addr_set_search(kflat,name);
+	if (node) {
+		rb_erase(&node->node, &kflat->root_addr_set);
+		return 1;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(root_addr_set_delete);
+
+void root_addr_set_destroy(struct kflat* kflat) {
+
+	struct rb_root* root = &kflat->root_addr_set;
+	struct rb_node * p = rb_first(root);
+    while(p) {
+        struct root_addr_set_node* data = (struct root_addr_set_node*)p;
+        rb_erase(p, root);
+        p = rb_next(p);
+        libflat_free((void*)data->name);
+        libflat_free(data);
+    }
+}
+EXPORT_SYMBOL(root_addr_set_destroy);
+
+size_t root_addr_set_count(struct kflat* kflat) {
+
+	struct rb_root* root = &kflat->root_addr_set;
+	struct rb_node * p = rb_first(root);
+	size_t count = 0;
+	while(p) {
+		count++;
+		p = rb_next(p);
+	}
+	return count;
+}
+EXPORT_SYMBOL(root_addr_set_count);
 
 void interval_tree_print(struct rb_root *root) {
 	struct rb_node * p = rb_first(root);
@@ -1471,6 +1572,7 @@ void flatten_init(struct kflat* kflat) {
 	memset(&kflat->FLCTRL,0,sizeof(struct FLCONTROL));
 	kflat->FLCTRL.fixup_set_root = RB_ROOT_CACHED;
 	kflat->FLCTRL.imap_root = RB_ROOT_CACHED;
+	kflat->root_addr_set.rb_node = 0;
 	kflat->mptrindex = 0;
 	kflat->msize = 0;
 	kflat->bqueue_mptrindex = 0;
@@ -1599,7 +1701,7 @@ int flatten_fini(struct kflat* kflat) {
     	kflat->FLCTRL.rtail = kflat->FLCTRL.rtail->next;
     	kflat_free(p);
     }
-    return interval_tree_destroy(kflat,&kflat->FLCTRL.imap_root.rb_root);
+    interval_tree_destroy(kflat,&kflat->FLCTRL.imap_root.rb_root);
 #if LINEAR_MEMORY_ALLOCATOR
     kvfree(kflat->mpool);
     kflat->mptrindex = 0;
@@ -1608,6 +1710,8 @@ int flatten_fini(struct kflat* kflat) {
     kflat->bqueue_mptrindex = 0;
     kflat->bqueue_msize = 0;
 #endif
+    root_addr_set_destroy(kflat);
+    return 0;
 }
 
 void flatten_set_debug_flag(struct kflat* kflat, int flag) {

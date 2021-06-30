@@ -157,6 +157,7 @@ struct kflat {
 	/* Task for which we collect coverage, or NULL. */
 	struct task_struct	*t;
 	struct FLCONTROL 	FLCTRL;
+	struct rb_root		root_addr_set;
 	int 				errno;
 	uintptr_t 			retv;
 	void*				mpool;
@@ -244,6 +245,12 @@ struct recipe_node {
 	flatten_struct_f f;
 };
 
+struct root_addr_set_node {
+	struct rb_node node;
+	char* name;
+	uintptr_t root_addr;
+};
+
 typedef void (*flatten_interface_arg_f)(struct kflat* kflat, const void* __arg);
 
 struct ifns_node {
@@ -251,6 +258,12 @@ struct ifns_node {
 	char* s;
 	flatten_interface_arg_f f;
 };
+
+struct root_addr_set_node* root_addr_set_search(struct kflat* kflat, const char* name);
+int root_addr_set_insert(struct kflat* kflat, const char* name, uintptr_t v);
+int root_addr_set_delete(struct kflat* kflat, const char* name);
+void root_addr_set_destroy(struct kflat* kflat);
+size_t root_addr_set_count(struct kflat* kflat);
 
 struct recipe_node* recipe_search(const char* s);
 int recipe_insert(const char* s, flatten_struct_f f);
@@ -4771,6 +4784,12 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE)
 #define UNREGISTER_INTERFACE_FUNCTION(__f,__var) \
 	ifns_delete(STR(IF__##__f##__##__var));
 
+#define REGISTER_INTERFACE_FUNCTION_NAME(__f) \
+	ifns_insert(STR(IF__##__f),(flatten_interface_arg_f)__f);
+
+#define UNREGISTER_INTERFACE_FUNCTION_NAME(__f) \
+	ifns_delete(STR(IF__##__f));
+
 #define REGISTER_GLOBAL_ACCESSOR(__fn,__var) \
 	ifns_insert(STR(GV__##__fn##__##__var),(flatten_interface_arg_f)__fn##_##__var);
 
@@ -4855,7 +4874,10 @@ FUNCTION_DEFINE_FLATTEN_STRUCT_TYPE_ARRAY_ITER_SELF_CONTAINED(FLTYPE,FLSIZE)
 			flatten_clear_option(KFLAT_ACCESSOR,KFLAT_OPTION_IN_PROGRESS);	\
 		}	\
 		if (!KFLAT_ACCESSOR->errno) {	\
-			KFLAT_ACCESSOR->errno = root_addr_append_extended(KFLAT_ACCESSOR, (uintptr_t)(p), __name, __size );	\
+			int err = root_addr_append_extended(KFLAT_ACCESSOR, (uintptr_t)(p), __name, __size );	\
+			if ((err) && (err!=EEXIST))	{	\
+				KFLAT_ACCESSOR->errno = err;	\
+			}	\
 		}	\
 	} while(0)
 

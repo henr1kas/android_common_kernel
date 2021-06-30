@@ -133,8 +133,13 @@ $(obj)/%.ll: $(src)/%.c FORCE
 # (See cmd_cc_o_c + relevant part of rule_cc_o_c)
 
 # Command line macros defined by kflat
-KFLAT_MACROS:=-D__STR\(s\)=\#s -DFLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED\(__f,__var,__arg\)="\
+KFLAT_TASK_STRUCT_PID_OFFSET:=0
+KFLAT_TASK_STRUCT_PARENT_OFFSET:=0
+KFLAT_MACROS:=-D__STR\(s\)=\#s -D__task_struct_at_offset_as\(__t,__offset,__type\)="(*((__type*)(((unsigned char*)(__t))+(__offset))))"\
+    -DFLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED\(__f,__var\)="\
 	do { 	\
+		struct task_struct;	\
+		struct kflat;	\
 		extern void* kflat_g_p;	\
 		extern void* ifns_search(const char* s);	\
 		extern int kflat_g_filter_pid_cache;	\
@@ -149,24 +154,32 @@ KFLAT_MACROS:=-D__STR\(s\)=\#s -DFLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED\(__f,_
 			void (*__4)(struct kflat* kflat, const void* __arg);	\
 		} __f\#\#__\#\#__var\#\#__\#\#ifnode_t;	\
 		if (unlikely(kflat_g_p)) {	\
-			if ((kflat_g_filter_pid_cache<0)||(task_pid_nr(get_current()->parent)==kflat_g_filter_pid_cache)) {	\
+			if ((kflat_g_filter_pid_cache<0)||	\
+				(__task_struct_at_offset_as(__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PARENT_OFFSET),struct task_struct*),$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t)==\
+					kflat_g_filter_pid_cache)) {	\
 				__f\#\#__\#\#__var\#\#__\#\#ifnode_t* ifnode = (__f\#\#__\#\#__var\#\#__\#\#ifnode_t*)ifns_search(__STR(IF__\#\#__f\#\#__\#\#__var));	\
 				if (!ifnode) {	\
-					printk(KERN_INFO \"kflat: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: interface function string not found (%s)\\n\",__STR(IF__\#\#__f\#\#__\#\#__var));	\
+					printk(KERN_INFO \"kflat [%d]: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: interface function string not found (%s)\\n\",\
+						__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t),__STR(IF__\#\#__f\#\#__\#\#__var));	\
 				}	\
 				else {	\
-					printk(KERN_INFO \"kflat: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: %s(%s:%s)\\n\",\#__f,\#__var,\#__arg);	\
-					(*ifnode->__4)(kflat_g_p,__arg);	\
+					printk(KERN_INFO \"kflat [%d]: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: %s(%s:%lx)\\n\",\
+						__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t),\#__f,\#__var,__var);	\
+					(*ifnode->__4)(kflat_g_p,__var);	\
 				}	\
 			} else {	\
 				if (kflat_g_debug_cache)	\
-					printk(KERN_INFO \"kflat: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: %s(%s:%s) - current ppid (%d) not matching filter pid (%d)\\n\",	\
-						\#__f,\#__var,\#__arg,task_pid_nr(get_current()->parent),kflat_g_filter_pid_cache); \
+					printk(KERN_INFO \"kflat [%d]: \" \"FLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED: %s(%s:%lx) - current ppid (%d) not matching filter pid (%d)\\n\",	\
+						__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t),\
+						\#__f,\#__var,__var,__task_struct_at_offset_as(__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PARENT_OFFSET),struct task_struct*),\
+							$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t),kflat_g_filter_pid_cache); \
 			}	\
 		}	\
 	}	\
 	while(0);" -DFLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED\(__fn,__var,__gptr\)="\
 	do { 	\
+		struct task_struct;	\
+		struct kflat;	 \
 		extern void* kflat_g_p;	\
 		extern void* ifns_search(const char* s);	\
 		extern int kflat_g_filter_pid_cache;	\
@@ -181,19 +194,25 @@ KFLAT_MACROS:=-D__STR\(s\)=\#s -DFLATTEN_FUNCTION_VARIABLE_SELF_CONTAINED\(__f,_
 			void (*__4)(struct kflat* kflat, const void* __arg);	\
 		} __fn\#\#__\#\#__var\#\#__\#\#ifnode_t;	\
 		if (unlikely(kflat_g_p)) {	\
-			if ((kflat_g_filter_pid_cache<0)||(task_pid_nr(get_current()->parent)==kflat_g_filter_pid_cache)) {	\
+			if ((kflat_g_filter_pid_cache<0)||	\
+				(__task_struct_at_offset_as(__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PARENT_OFFSET),struct task_struct*),$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t)==\
+					kflat_g_filter_pid_cache)) {	\
 				__fn\#\#__\#\#__var\#\#__\#\#ifnode_t* ifnode = (__fn\#\#__\#\#__var\#\#__\#\#ifnode_t*)ifns_search(__STR(GV__\#\#__fn\#\#__\#\#__var));	\
 				if (!ifnode) {	\
-					printk(KERN_INFO \"kflat: \" \"FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED: interface function string not found (%s)\\n\",__STR(GV__\#\#__fn\#\#__\#\#__var));	\
+					printk(KERN_INFO \"kflat [%d]: \" \"FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED: interface function string not found (%s)\\n\",\
+						__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t),__STR(GV__\#\#__fn\#\#__\#\#__var));	\
 				}	\
 				else {	\
-					printk(KERN_INFO \"kflat: \" \"FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED: %s(%s:%s)\\n\",\#__fn,\#__var,\#__gptr);	\
+					printk(KERN_INFO \"kflat [%d]: \" \"FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED: %s(%s:%s)\\n\",\#__fn,\#__var,\#__gptr);	\
+					__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t),\
 					(*ifnode->__4)(kflat_g_p,__gptr);	\
 				}	\
 			} else {	\
 				if (kflat_g_debug_cache)	\
 					printk(KERN_INFO \"kflat: \" \"FLATTEN_GLOBAL_VARIABLE_SELF_CONTAINED: %s(%s:%s) - current ppid (%d) not matching filter pid (%d)\\n\",	\
-						\#__fn,\#__var,\#__gptr,task_pid_nr(get_current()->parent),kflat_g_filter_pid_cache); \
+						__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t),\
+						\#__fn,\#__var,\#__gptr,__task_struct_at_offset_as(__task_struct_at_offset_as(get_current(),$(KFLAT_TASK_STRUCT_PARENT_OFFSET),struct task_struct*),\
+							$(KFLAT_TASK_STRUCT_PID_OFFSET),pid_t),kflat_g_filter_pid_cache); \
 			}	\
 		}	\
 	}	\
