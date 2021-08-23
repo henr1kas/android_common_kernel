@@ -16,6 +16,8 @@ def isAnonRecordDependent(RT,depT):
 	elif (depT["class"]=="const_array" or depT["class"]=="incomplete_array") and depT["refs"][0]==RT["id"]:
 		# struct { u16 index; u16 dist;} near[0];
 		return True
+	elif depT["class"]=="pointer" and depT["refs"][0]==RT["id"]:
+		return True
 	else:
 		return False
 
@@ -111,6 +113,28 @@ class DerefInfo:
 		else:
 			return None,None
 
+
+	# Walk through pointer or array types and extract underlying record type
+	# Returns (RT,TPD) pair where:
+	#  RT: underlying record type
+	#  TPD: if the underlying record type was a typedef this is the original typedef type
+	# In case record type cannot be resolved returns (None,None) pair
+	def resolve_record_type_or_not(self,TID,TPD=None):
+
+		T = self.refmap[TID]
+		if T["class"]=="record" or T["class"]=="record_forward":
+			return T,TPD
+		elif T["class"]=="pointer" or T["class"]=="const_array" or T["class"]=="incomplete_array":
+			TPD = None
+			return self.resolve_record_type_or_not(T["refs"][0],TPD)
+		elif T["class"]=="typedef":
+			if TPD is None:
+				TPD = T
+			return self.resolve_record_type_or_not(T["refs"][0],TPD)
+		elif T["class"]=="attributed":
+			return self.resolve_record_type_or_not(T["refs"][0],TPD)
+		else:
+			return None,None
 
 	def resolve_record_type(self,T):
 
@@ -625,6 +649,404 @@ class DerefInfo:
 						derefL.append((f["id"],T,TPD,T["refnames"][n],MT,D["offset"],len(D["offsetrefs"])-1,D["expr"]))
 		return derefL
 
+	def _resolve_member_expression_name(self,initME):
+
+		refname_list = list()
+		for i,TID in enumerate(initME["type"]):
+			T = self.refmap[TID]
+			RT = self.resolve_record_type(T)
+			refname = RT["refnames"][initME["member"][i]]
+			if refname!="__!anonrecord__":
+				refname_list.append(refname)
+		return ".".join(refname_list)
+
+	def _resolve_generic_pointer_member_name(self,initME):
+
+		refname = ""
+		refid = None
+		for i,TID in reversed(list(enumerate(initME["type"]))):
+			T = self.refmap[TID]
+			if initME["access"][i]>0:
+				T = self.resolve_record_type(T)
+			MT = self.refmap[T["refs"][initME["member"][i]]]
+			if MT["class"]=="pointer":
+				continue
+			RT = self.resolve_record_type(T)
+			refname += RT["refnames"][initME["member"][i]]
+			refid = initME["member"][i]
+			break
+		return refname,refid
+			
+
+	# Walks all the members for a given struct type (including embedded members inside internal struct types) and returns the list of following items:
+	# (T,memberTypeList,refnameList,memberOffsetList), where:
+	# T: original struct type under inspection
+	# memberTypeList: [_id,...] - list of struct type member ids embedded into this structure that lead to the final 'list_head' struct type
+	# refnameList: [_name,...] - list of struct type member names embedded into this structure that lead to the final 'list_head' member
+	# memberOffsetList: list of member offsets for each struct type member into this structure that lead to the final 'list_head' struct type
+	# For example give the following struct type definitions:
+	#  struct B {
+	# 	int i;
+	#	struct list_head head;
+	#  }
+	#  struct A {
+	# 	long l;
+	#	struct B b;
+	#  }
+	# The return items should be:
+	# (_id(struct A),[_id(struct B),_id(struct list_head)],["b","head"])
+	#
+	# If the argument T passed to this function is not a struct type the return value is None
+
+	def _lookForListHeadTypes(self,T):
+
+		lhTypes = list()
+
+		if T["class"]!="record":
+			return None
+
+		try:
+			real_refs = list()
+			ignore_count=0
+			# As of the current quirk of dbjson when there's anonymous record inside a structure followed by a name we will have two entries in "refs"
+			#  but only single entry in "memberoffsets"
+			#	struct X { ... };       // ignore "__!recorddecl__" from refs/refnames/usedrefs (present in decls)
+			#	struct X { ... } w;     // ignore "__!recorddecl__" from refs/refnames/usedrefs (present in decls)
+			#	struct { ... };         // "__!anonrecord__" as a normal member (present in decls)
+			#	struct { ... } w;       // ignore "__!anonrecord__" from refs/refnames/usedrefs (present in decls)
+			#  summary: ignore all "__!recorddecl__" from decls and "__!anonrecord__" if there's the same refs entry that follows
+			for i in xrange(len(T["refnames"])-getAttrNum(T)):
+				if i in T["decls"] and ( T["refnames"][i]!="__!anonrecord__" or (i+1<len(T["refs"]) and 
+						isAnonRecordDependent(self.refmap[T["refs"][i]],self.refmap[T["refs"][i+1]]))):
+					ignore_count+=1
+					continue
+				else:
+					real_refs.append( (T["refs"][i],T["refnames"][i],T["usedrefs"][i],T["memberoffsets"][i-ignore_count],[],[],[],T["union"]) )
+		except Exception as e:
+			print json.dumps(T,indent=4)
+			raise e
+		## Structure member can be another structure hence its members leak into the parent structure type
+		while len(real_refs)>0:
+			_mid,_mname,_mused,_moff,memberoffset_list,refname_prefix_list,membertype_list,inUnion = real_refs.pop(0)
+			RT = self.refmap[_mid]
+			TPD = None
+			if RT["class"]=="typedef":
+				TPD = RT
+				RT = self.walkTPD(RT)
+			if RT["class"]=="record":
+				internal_real_refs = list()
+				ignore_count=0
+				for i in xrange(len(RT["refnames"])-getAttrNum(RT)):
+					if i in RT["decls"] and ( RT["refnames"][i]!="__!anonrecord__" or (i+1<len(RT["refs"]) and 
+							isAnonRecordDependent(self.refmap[RT["refs"][i]],self.refmap[RT["refs"][i+1]]))):
+						ignore_count+=1
+						continue
+					else:
+						member_list = list()
+						if _mname!="__!anonrecord__":
+							member_list.append(_mname)
+						internal_real_refs.append( (RT["refs"][i],RT["refnames"][i],RT["usedrefs"][i],RT["memberoffsets"][i-ignore_count],
+							memberoffset_list+[_moff],refname_prefix_list+member_list,membertype_list+[_mid],RT["union"] if inUnion is False else inUnion) )
+				real_refs = internal_real_refs+real_refs
+				if RT["str"]=="list_head":
+					tp_list = "".join(["[%s]"%(mT["str"]) for mT in [self.refmap[x] for x in membertype_list+[_mid]]])
+					#print "%s %s"%(tp_list,".".join(refname_prefix_list+[_mname]))
+					lhTypes.append((T["id"],membertype_list+[_mid],refname_prefix_list+[_mname],[sz/8 for sz in memberoffset_list+[_moff]]))
+
+		return lhTypes
+
+
+	def findContainerOfEntries(self,report_errors=False,quiet=False,debug=False,tpdebug=False,logdebug=False):
+
+		__read_once_size_id = self.fnrefmap["__read_once_size"][0]
+		lhTypes = list()
+		for T in self.db["types"]:
+			rT = self._lookForListHeadTypes(T)
+			if rT is not None:
+				lhTypes+=rT
+		if tpdebug:
+			for lhT in lhTypes:
+				tp_list = "".join(["[%s]"%(T["str"]) for T in [self.refmap[x] for x in [lhT[0]]+lhT[1]]])
+				print "%s %s (%s)"%(tp_list,".".join(lhT[2]),",".join(["%d"%(moff) for moff in lhT[3]]))
+			print len(lhTypes)
+
+		F = self.db["funcs"]
+		# List of locations for purported usage of 'container_of' macro
+		# We get it by first extracting locations of all '__mptr' local variables (which are used inside 'container_of' macro)
+		#  and then matching offsetof dereference expressions with these locations (which happens later inside 'container_of' macro)
+		# (D,dloc,f), where
+		#   D - offsetof dereference expression used at the location with '__mptr' variable
+		#   dloc - location of '__mptr' variable
+		#   f - original function where offsetof was taken
+		container_of_derefs = list()
+		for f in F:
+			mptr_locs = set([":".join(x["location"].split()[0].split(":")[:-1]) for x in f["locals"] if x["parm"] is False and x["name"]=="__mptr"])
+			for D in f["derefs"]:
+				if D["kind"]=="offsetof":
+					# We will look for offsetof expressions with computed offset value
+					dloc = ":".join(D["expr"].split("]:")[0][1:].split()[0].split(":")[:-1])
+					if dloc in mptr_locs:
+						container_of_derefs.append((D,dloc,f))
+		if not quiet:
+			print "Number of 'container_of' invocations: %d"%(len(container_of_derefs))
+		initExpr_count = 0
+		initExpr_member_count = 0
+		container_of_ptr_types = {}
+		generic_pointer_type_list = set(["list_head","device","crypto_alg","device_driver","rb_node"])
+		for D,dloc,f in container_of_derefs:
+			# How to extract the pointer passed to 'container_of' macro?
+			# First we get the location of the 'container_of' invocation ('dloc')
+			#  and lookup the index of the corresponding '__mptr' variable (with the same location)
+			# Then search for the 'init' dereference expression that initializes the '__mptr' variable detected above
+			# Finally extract the initializer member expression when applicable
+			# There's a quirk however when the member expression passed to 'container_of' goes through 'READ_ONCE' macro
+			# To account for that whenever we detect that the initializer member expression type is anonymous union we do the following steps:
+			#  look into 'calls' array from this function where 'container_of' is used and locate invocations of '__read_once_size' function
+			#  find first '__read_once_size' invocation location (from 'call_info' array) that matches the 'dloc' location
+			#  get the dereference expression for its first argument ('parm' kind) and extract the member expression it points to (this is what we're looking for)
+			# To complicate things further we might have several 'container_of' invocations in one higher-level macro (and hence the same location)
+			#  This can be resolved by combining '__mptr' variable with offsetof dereference expression that both share the same 'csid'
+			mptr_map = { (":".join(x["location"].split()[0].split(":")[:-1]),x["csid"]):i for i,x in enumerate(f["locals"]) if x["parm"] is False and x["name"]=="__mptr" }
+			if (dloc,D["csid"]) in mptr_map:
+				i = mptr_map[(dloc,D["csid"])]
+				for x in f["derefs"]:
+					if x["kind"]=="init":
+						iloc = ":".join(x["expr"].split("]:")[0][1:].split()[0].split(":")[:-1])
+						if iloc==dloc and x["csid"]==D["csid"] and x["offsetrefs"][0]["kind"]=="local" and x["offsetrefs"][0]["id"]==i:
+							initExpr = x["offsetrefs"][1]
+							initExpr_count+=1
+							if initExpr["kind"]=="member":
+								# init expression for the 'container_of' pointer variable (void *__mptr = <EXPR>) is a mamber expression
+								initME = f["derefs"][initExpr["id"]]
+								initExpr_member_count+=1
+								RT = self.resolve_record_type(self.refmap[initME["type"][-1]])
+								mRT = self.refmap[RT["refs"][initME["member"][-1]]]
+								mName,mId = self._resolve_generic_pointer_member_name(initME)
+								refname_list = list()
+								for i in xrange(len(D["type"])):
+									tpT = self.refmap[D["type"][i]]
+									refname_list.append(tpT["refnames"][D["member"][i]])
+								ME = initME
+								pRT = None
+								if RT["union"] is True and RT["str"]=="":
+									# Check if the initializer member expression goes through 'READ_ONCE' macro
+									rdonceList = [ii for ii,cid in enumerate(f["calls"]) if cid==__read_once_size_id]
+									rdonceCI = [f["call_info"][ii] for ii in rdonceList if ":".join(f["call_info"][ii]["loc"].split()[0].split(":")[:-1])==dloc]
+									if len(rdonceCI)>0:
+										parmD = f["derefs"][rdonceCI[0]["args"][0]]
+										if len(parmD["offsetrefs"])>0 and parmD["offsetrefs"][0]["kind"]=="member":
+											ME = f["derefs"][parmD["offsetrefs"][0]["id"]]
+											RT = self.resolve_record_type(self.refmap[ME["type"][-1]])
+									mRT = self.refmap[RT["refs"][ME["member"][-1]]]
+									mName,mId = self._resolve_generic_pointer_member_name(ME)
+								if ME["offsetrefs"][0]["kind"]=="array":
+									# We might access generic pointer through array access in member expression as in:
+									# struct A {
+									#	struct {
+									#		struct list_head lhArr[4];
+									#   }
+									#   struct X* pX;
+									# } obA, obAarr[4];
+									# (1) container_of( obA.lhArr[2].next, ...)
+									# (2) container_of( obAarr[2].pX, ...)
+									arrD = f["derefs"][ME["offsetrefs"][0]["id"]]
+									if arrD["offsetrefs"][0]["kind"]=="member":
+										# Here goes for (1)
+										ME = f["derefs"][arrD["offsetrefs"][0]["id"]]
+										mName,mId = self._resolve_generic_pointer_member_name(ME)
+										if RT["str"] in generic_pointer_type_list:
+											pRT = self.resolve_record_type(self.refmap[ME["type"][-1]])
+									else:
+										# Here goes for (2)
+										if arrD["offsetrefs"][0]["kind"]=="parm" or arrD["offsetrefs"][0]["kind"]=="local":
+											if RT["str"] in generic_pointer_type_list:
+												vT = f["locals"][arrD["offsetrefs"][0]["id"]]["type"]
+												pRT = self.resolve_record_type(self.refmap[vT])
+										elif arrD["offsetrefs"][0]["kind"]=="global":
+											if RT["str"] in generic_pointer_type_list:
+												vT = self.grefmap[arrD["offsetrefs"][0]["id"]]["type"]
+												pRT = self.resolve_record_type(self.refmap[vT])
+								else:
+									# Plain array of struct with generic pointer
+									# struct A {
+									#	struct list_head lh;
+									# } obA;
+									# container_of( obA.lh.next, ...)
+									if RT["str"] in generic_pointer_type_list and len(ME["type"])>1:
+										# Walk the nested members backwards to find first non-anonymous record
+										for u in reversed(xrange(len(ME["type"])-1)):
+											pRT = self.resolve_record_type(self.refmap[ME["type"][u]])
+											if pRT["str"]!="": break
+								
+								# container_of vector
+								# RT - record type of the member expression passed as a ptr to 'container_of' macro
+								# pRT - record type of the member expression (containing the generic pointer (e.g. 'list_head')) passed as a ptr to 'container_of' macro
+								#   When pRT is None it means generic pointer is not used inside member expression or RT is not a generic pointer
+								# mi - index of the member in the member expression passed as a ptr to 'container_of' macro
+								# ME - 
+								# mRT - type of the member in the member expression passed as a ptr to 'container_of' macro
+								# mName - 
+								# mId - 
+								# D - original 'offsetof' dereference entry from this 'container_of' macro
+								# dloc - location of the 'container_of' macro invocation
+								# f - original function where offsetof was taken
+								_RT,_TPD = self.resolve_record_type_or_not(mRT["id"])
+								if _RT and _RT["str"]!="":
+									_k = "struct %s"%(_RT["str"])
+								else:
+									_k = mRT["hash"]
+								_v = (RT,pRT,f["derefs"][initExpr["id"]],ME,mRT,mName,mId,D,dloc,f)
+								if _k in container_of_ptr_types:
+									container_of_ptr_types[_k].append(_v)
+								else:
+									container_of_ptr_types[_k] = [_v]
+		if not quiet:
+			print "Number of extracted 'container_of' pointer expressions: %d"%(initExpr_count)
+			print "Number of extracted 'container_of' member pointer expressions: %d"%(initExpr_member_count)
+			print "Number of distinct 'container_of' pointer types: %d"%(len(container_of_ptr_types))
+		container_of_ptr_types_items = sorted(container_of_ptr_types.iteritems(),key = lambda x: len(x[1]),reverse=True)
+		generic_pointer_type_mappings = {}
+		
+		def container_of_entry_string(RT,pRT,ME,PT,mRT,mName,dloc,ref,D):
+			s = ""
+			if pRT is not None:
+				s+="container_of parent ptr: %s\n"%(pRT["hash"])
+			else:
+				s+="container_of ptr: %s\n"%(RT["hash"])
+			s+="member type: %s\n"%(mRT["hash"])
+			s+="member name: %s\n"%(mName)
+			s+="expr: %s\n"%(ME["expr"].split("]:")[1].strip())
+			s+="loc: %s\n"%(dloc)
+			s+="container type: %s ---> [%s:%d]\n\n"%(PT["hash"],ref,D["offset"])
+			return s
+
+		# {
+		#   <member_type> : (
+		#						[ parent_record_type_mapping_log ]				# Generic pointer is mapped into structure type that differs from the structure it is embedded in
+		#						[ parent_record_type_mapping_failed_log ]
+		#						[ parent_record_type_mapping_unhandled_log ]
+		#						[ parent_record_type_mapping_match_log ]		# Generic pointer cast in 'container_of' matches the structure it is embedded in
+		#						[ parent_record_type_mapping_generic_log ]		# Generic pointer is itself an container structure (it is used as a variable, not a structure member)
+		#					)
+		# }
+		container_of_logs = {}
+		for _k,_v in container_of_ptr_types_items:
+			if _k not in container_of_logs:
+				container_of_logs[_k] = ([],[],[],[],[])
+			for RT,pRT,initME,ME,mRT,mName,mId,D,dloc,f in _v:
+				# PT - the type of container structure used in the 'container_of' cast
+				PT = self.refmap[D["type"][0]]
+				container_type = PT["str"]
+				refname_list = list()
+				for i in xrange(len(D["type"])):
+					tpT = self.refmap[D["type"][i]]
+					refname_list.append(tpT["refnames"][D["member"][i]])
+				if pRT is not None and pRT["hash"]!=PT["hash"]:
+					# Parent structure holding generic pointer differs from the type generic pointer is casted to
+					container_of_parent_ptr = pRT["str"]
+					if container_of_parent_ptr!="" and container_type!="":
+						logs = container_of_entry_string(RT,pRT,initME,PT,mRT,mName,dloc,".".join(refname_list),D)
+						if _k not in generic_pointer_type_mappings:
+							generic_pointer_type_mappings[_k] = {}
+						gptm_key = (pRT["id"],mName,mId)
+						if gptm_key not in generic_pointer_type_mappings[_k]:
+							generic_pointer_type_mappings[_k][gptm_key] = list()
+						generic_pointer_type_mappings[_k][gptm_key].append((container_type,PT["id"],logs,".".join(refname_list),D["offset"]))
+						# [mapping log]
+						container_of_logs[_k][0].append(logs)
+					else:
+						# [failed log]
+						container_of_logs[_k][1].append(container_of_entry_string(RT,pRT,initME,PT,mRT,mName,dloc,".".join(refname_list),D))
+				elif pRT is None:
+					# Either generic pointer is not used inside member expression or RT is not a generic pointer
+					if RT["str"] in generic_pointer_type_list and len(ME["type"])==1 and len(ME["offsetrefs"])==1 and \
+							(ME["offsetrefs"][0]["kind"]=="global" or ME["offsetrefs"][0]["kind"]=="local" or ME["offsetrefs"][0]["kind"]=="parm" or ME["offsetrefs"][0]["kind"]=="unary"):
+						# 'container_of' is directly used on generic pointer variable (no member expression in specific class)
+						# [generic log]
+						container_of_logs[_k][4].append(container_of_entry_string(RT,pRT,initME,PT,mRT,mName,dloc,".".join(refname_list),D))
+					else:
+						if RT["str"] not in generic_pointer_type_list:
+							# [mapping log]
+							logs = container_of_entry_string(RT,pRT,initME,PT,mRT,mName,dloc,".".join(refname_list),D)
+							container_of_logs[_k][0].append(logs)
+							container_of_ptr = RT["str"]
+							if _k not in generic_pointer_type_mappings:
+								generic_pointer_type_mappings[_k] = {}
+							gptm_key = (RT["id"],"",-1)
+							if gptm_key not in generic_pointer_type_mappings[_k]:
+								generic_pointer_type_mappings[_k][gptm_key] = list()
+							generic_pointer_type_mappings[_k][gptm_key].append((container_type,PT["id"],logs,".".join(refname_list),D["offset"]))
+						else:
+							# Unhandled generic pointer
+							# [unhandled log]
+							container_of_logs[_k][2].append(container_of_entry_string(RT,pRT,initME,PT,mRT,mName,dloc,".".join(refname_list),D))
+				else:
+					# Parent structure and the type generic pointer is casted to match
+					# [match log]
+					logs = container_of_entry_string(RT,pRT,initME,PT,mRT,mName,dloc,".".join(refname_list),D)
+					container_of_logs[_k][3].append(logs)
+					if _k not in generic_pointer_type_mappings:
+						generic_pointer_type_mappings[_k] = {}
+					gptm_key = (PT["id"],mName,mId)
+					if gptm_key not in generic_pointer_type_mappings[_k]:
+						generic_pointer_type_mappings[_k][gptm_key] = list()
+					generic_pointer_type_mappings[_k][gptm_key].append((container_type,PT["id"],logs,".".join(refname_list),D["offset"]))
+
+		if logdebug:
+			for _k,_v in sorted(container_of_logs.iteritems(),key = lambda x: len(x[1][0])+len(x[1][1])+len(x[1][2])+len(x[1][3]),reverse=True):
+				print "## 'container_of' usage for member '%s' : %d\n"%(_k,len(_v[0])+len(_v[1])+len(_v[2])+len(_v[3]))
+				print "#  Matching logs"
+				for logl in _v[3]:
+					print logl
+				print "#  Mapping logs"
+				for logl in _v[0]:
+					print logl
+				print "#  Generic logs"
+				for logl in _v[4]:
+					print logl
+				print "#  Failed logs"
+				for logl in _v[1]:
+					print logl
+				print "#  Unhandled logs"
+				for logl in _v[2]:
+					print logl
+
+		if not quiet:
+			print
+		container_of_mappings = {}
+		for _k in generic_pointer_type_mappings:
+			vmap = {}
+			for kT,vT in generic_pointer_type_mappings[_k].iteritems():
+				for Ts,TID,lg,ref,off in vT:
+					if kT not in vmap:
+						vmap[kT] = list()
+					vmap[kT].append((Ts,TID,lg,ref,off))
+			if len(vmap)>=5:
+				if not quiet:
+					print "# Number of '%s' mappings: %d"%(_k,len(vmap))
+				for kT,v in vmap.iteritems():
+					k = "%s:%s"%(self.refmap[kT[0]]["str"],kT[1])
+					vm = {}
+					for Ts,TID,lg,ref,off in v:
+						if (Ts,TID) not in vm:
+							vm[(Ts,TID)] = list()
+						vm[(Ts,TID)].append(lg)
+					if not quiet:
+						print " %s => [%s]%s"%(k,",".join(["%s(%d)"%("%s"%(u[0]),len(vm[u])) for u in vm.keys()])," "*20+"".join(["*"*5+" " for x in vm.keys()]) if len(vm.keys())>1 else "")
+					gpk = _k.split()[1]
+					if gpk not in container_of_mappings:
+						container_of_mappings[gpk] = {}
+					container_of_mappings[gpk][(kT[0],kT[2])] = [u[1] for u in vm.keys()]
+					if debug:
+						for Ts,lgL in vm.iteritems():
+							print "    @ %s => %s(%d):"%(k,Ts,len(lgL))
+							for lg in lgL:
+								print "\n".join(" "*6+x for x in lg.split("\n"))
+
+		if not quiet:
+			print "Number of container_of final mappings: %d"%(len(container_of_mappings))
+		return container_of_mappings
+
 
 	def nonVoidPtrTypes(self,Ts):
 
@@ -865,5 +1287,7 @@ DI = DerefInfo()
 #castMeL = DI.findMemberExprCasts(False)
 #DI.MemberExprCastsSummary(castMeL,True)
 
-derefL = DI.findDerefsOnMemberExprs(False)
-DI.DerefsOnMemberExprsSummary(derefL,True)
+#derefL = DI.findDerefsOnMemberExprs(False)
+#DI.DerefsOnMemberExprsSummary(derefL,True)
+
+container_of_mappings = DI.findContainerOfEntries(False,True)
