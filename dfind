@@ -10,21 +10,10 @@ def getAttrNum(RT):
 	else:
 		return 0
 
-def isAnonRecordDependent(RT,depT):
-	if RT["id"]==depT["id"]:
-		return True
-	elif (depT["class"]=="const_array" or depT["class"]=="incomplete_array") and depT["refs"][0]==RT["id"]:
-		# struct { u16 index; u16 dist;} near[0];
-		return True
-	elif depT["class"]=="pointer" and depT["refs"][0]==RT["id"]:
-		return True
-	else:
-		return False
-
 class DerefInfo:
-	
+
 	def __init__(self):
-		
+
 		with open("db.json","rb") as f:
 			self.db = json.loads(f.read())
 		self.frefmap = {}
@@ -50,6 +39,16 @@ class DerefInfo:
 			print "Couldn't find void* type in JSON database. Giving up"
 			sys.exit(0)
 
+	def isAnonRecordDependent(self,RT,depT):
+		# drop pointer/array types
+		while depT["class"] in ["pointer","const_array","incomplete_array","function"]:
+			depT = self.refmap[depT["refs"][0]]
+		# same type bar qualifiers
+		if depT["class"] == "record" and RT["hash"] == depT["hash"].replace(depT["qualifiers"],"",1):
+			return True
+		else:
+			return False
+
 	def lookForPtrToVoid(self):
 
 		pv = set(())
@@ -73,7 +72,7 @@ class DerefInfo:
 		#  summary: ignore all "__!recorddecl__" from decls and "__!anonrecord__" if there's the same refs entry that follows
 		for i in xrange(len(T["refnames"])-getAttrNum(T)):
 			if i in T["decls"] and ( T["refnames"][i]!="__!anonrecord__" or (i+1<len(T["refs"]) and 
-					isAnonRecordDependent(self.refmap[T["refs"][i]],self.refmap[T["refs"][i+1]]))):
+					self.isAnonRecordDependent(self.refmap[T["refs"][i]],self.refmap[T["refs"][i+1]]))):
 				ignore_count+=1
 				continue
 			if i-ignore_count>=n:
@@ -717,7 +716,7 @@ class DerefInfo:
 			#  summary: ignore all "__!recorddecl__" from decls and "__!anonrecord__" if there's the same refs entry that follows
 			for i in xrange(len(T["refnames"])-getAttrNum(T)):
 				if i in T["decls"] and ( T["refnames"][i]!="__!anonrecord__" or (i+1<len(T["refs"]) and 
-						isAnonRecordDependent(self.refmap[T["refs"][i]],self.refmap[T["refs"][i+1]]))):
+						self.isAnonRecordDependent(self.refmap[T["refs"][i]],self.refmap[T["refs"][i+1]]))):
 					ignore_count+=1
 					continue
 				else:
@@ -738,7 +737,7 @@ class DerefInfo:
 				ignore_count=0
 				for i in xrange(len(RT["refnames"])-getAttrNum(RT)):
 					if i in RT["decls"] and ( RT["refnames"][i]!="__!anonrecord__" or (i+1<len(RT["refs"]) and 
-							isAnonRecordDependent(self.refmap[RT["refs"][i]],self.refmap[RT["refs"][i+1]]))):
+							self.isAnonRecordDependent(self.refmap[RT["refs"][i]],self.refmap[RT["refs"][i+1]]))):
 						ignore_count+=1
 						continue
 					else:
